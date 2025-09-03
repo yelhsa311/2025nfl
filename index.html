@@ -154,36 +154,35 @@
     catch (e) { alert(e.message); }
   });
 
-  // ---------- AUTH STATE ----------
-  onAuthStateChanged(auth, async (user) => {
-    state.user = user || null;
+// ---------- AUTH STATE ----------
+onAuthStateChanged(auth, async (user) => {
+  state.user = user || null;
 
-    if (!user){
-      el("#auth").style.display = "block";
-      el("#app").style.display  = "none";
-      el("#userBox").innerHTML  = "";
-      return;
-    }
+  if (!user){
+    el("#auth").style.display = "block";
+    el("#app").style.display  = "none";
+    el("#userBox").innerHTML  = "";
+    return;
+  }
 
-    // Header user info + sign out
-    el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
-    el("#signOutBtn").addEventListener("click", () => signOut(auth));
+  // Header user info + sign out
+  el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
+  el("#signOutBtn").addEventListener("click", () => signOut(auth));
 
-    // Admin check + toggle admin-only controls
-    state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
-    document.body.classList.toggle('is-admin', state.isAdmin);
-    document.querySelectorAll(".adminOnly").forEach(n => {
-      if (n.id === "adminAddPanel") n.style.display = "none"; // keep panel collapsed until +Add
-      else n.style.display = state.isAdmin ? "" : "none";
-    });
+  // ✅ Admin check
+  state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
 
-    // Show app + load
-    el("#auth").style.display = "none";
-    el("#app").style.display  = "block";
+  // ✅ Toggle CSS class on <body>
+  document.body.classList.toggle("is-admin", state.isAdmin);
 
-    await setupWeeks();
-    await subscribeWeek();
-  });
+  // Show app + load data
+  el("#auth").style.display = "none";
+  el("#app").style.display  = "block";
+
+  await setupWeeks();
+  await subscribeWeek();
+});
+
 
   // ---------- WEEKS ----------
   async function setupWeeks(){
