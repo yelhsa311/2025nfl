@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User</title>
+  <title>NFL Picks • User (v10)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -41,7 +41,7 @@
     <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
-      <button id="btnSignOut" class="ghost" style="display:none">Sign out</button>
+      <button id="btnSignOut" class="ghost" style="display:none" type="button">Sign out</button>
     </div>
   </header>
 
@@ -52,8 +52,8 @@
         <input id="inEmail" type="email" placeholder="email@example.com" />
         <input id="inPass" type="password" placeholder="password" />
         <div class="row">
-          <button id="btnSignIn" class="primary">Sign in</button>
-          <button id="btnCreate" class="ghost">Create account</button>
+          <button id="btnSignIn"  class="primary" type="button" onclick="window._signin && window._signin()">Sign in</button>
+          <button id="btnCreate"  class="ghost"   type="button" onclick="window._create && window._create()">Create account</button>
         </div>
         <div id="authMsg" class="hint"></div>
       </div>
@@ -66,8 +66,8 @@
         <input id="inSeason" placeholder="Season (e.g. 2025)" />
       </div>
       <div class="row">
-        <button id="btnReload" class="ghost">Reload</button>
-        <span class="hint">Picks lock at kickoff. Choose carefully!</span>
+        <button id="btnReload" class="ghost" type="button">Reload</button>
+        <span class="hint">Choose your pick from the dropdown. Picks lock at kickoff.</span>
       </div>
     </section>
 
@@ -102,7 +102,7 @@
       getFirestore, collection, doc, setDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // ---- Firebase config (your project) ----
+    // ---- Your Firebase config
     const firebaseConfig = {
       apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
       authDomain: "nflpicks2025-51202.firebaseapp.com",
@@ -113,27 +113,24 @@
       measurementId: "G-289KXJQZGG"
     };
 
+    // ---- Init
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db = getFirestore(app);
+    const db   = getFirestore(app);
 
-    // ---- DOM ----
+    // ---- DOM
     const who = document.getElementById('who');
     const btnSignOut = document.getElementById('btnSignOut');
     const authForm = document.getElementById('authForm');
     const inEmail = document.getElementById('inEmail');
     const inPass  = document.getElementById('inPass');
-    const btnSignIn = document.getElementById('btnSignIn');
-    const btnCreate = document.getElementById('btnCreate');
-    const authMsg = document.getElementById('authMsg');
-
+    const btnReload = document.getElementById('btnReload');
     const selWeek = document.getElementById('selWeek');
     const inSeason = document.getElementById('inSeason');
-    const btnReload = document.getElementById('btnReload');
     const tblGamesBody = document.querySelector('#tblGames tbody');
     const weekSummary = document.getElementById('weekSummary');
 
-    // ---- Helpers ----
+    // ---- Helpers
     const ts = () => serverTimestamp();
     function clearTable(tbody){ while (tbody.firstChild) tbody.removeChild(tbody.firstChild); }
     function fmtPct(c,t){ return t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—'; }
@@ -142,14 +139,30 @@
     const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
     const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks');
 
-    // week options
-    for (let w=1; w<=18; w++){
-      const v=String(w).padStart(2,'0');
-      const opt=document.createElement('option'); opt.value=v; opt.textContent='Week '+w; selWeek.appendChild(opt);
-    }
-    inSeason.value = new Date().getFullYear();
-    selWeek.value = '01';
+    // ---- Expose bulletproof auth handlers (so clicks always work)
+    window._signin = async () => {
+      const msgEl = document.getElementById('authMsg');
+      try {
+        await signInWithEmailAndPassword(auth, inEmail.value, inPass.value);
+        msgEl.textContent = 'Signed in.';
+      } catch (e) {
+        console.error(e);
+        msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
+      }
+    };
+    window._create = async () => {
+      const msgEl = document.getElementById('authMsg');
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
+        await setDoc(doc(db,'users',cred.user.uid), { displayName: inEmail.value.split('@')[0], createdAt: ts() }, { merge:true });
+        msgEl.textContent = 'Account created.';
+      } catch (e) {
+        console.error(e);
+        msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
+      }
+    };
 
+    // ---- Auth state
     let unsubGames = null;
     let currentUser = null;
     let myPicks = new Map(); // gameId -> pick
@@ -160,6 +173,7 @@
         who.textContent = u.email || u.uid;
         authForm.style.display='none';
         btnSignOut.style.display='inline-block';
+        // ensure /users doc exists (optional nicety)
         await setDoc(doc(db,'users',u.uid), { displayName: (u.email||'').split('@')[0], updatedAt: ts() }, { merge:true });
         attachGameListener();
       } else {
@@ -168,23 +182,20 @@
         btnSignOut.style.display='none';
         detachGameListener();
         clearTable(tblGamesBody);
+        weekSummary.textContent = '';
       }
     });
 
-    btnSignIn.onclick = async ()=>{
-      try{ await signInWithEmailAndPassword(auth, inEmail.value, inPass.value); authMsg.textContent='Signed in.'; }
-      catch(e){ authMsg.textContent=e.message; }
-    };
-    btnCreate.onclick = async ()=>{
-      try{
-        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
-        await setDoc(doc(db,'users',cred.user.uid), { displayName: inEmail.value.split('@')[0], createdAt: ts() }, { merge:true });
-        authMsg.textContent='Account created.';
-      } catch(e){ authMsg.textContent=e.message; }
-    };
     btnSignOut.onclick = ()=> signOut(auth);
+    btnReload.onclick  = ()=> attachGameListener();
 
-    btnReload.onclick = ()=> attachGameListener();
+    // week options
+    for (let w=1; w<=18; w++){
+      const v=String(w).padStart(2,'0');
+      const opt=document.createElement('option'); opt.value=v; opt.textContent='Week '+w; selWeek.appendChild(opt);
+    }
+    inSeason.value = new Date().getFullYear();
+    selWeek.value = '01';
     selWeek.onchange = ()=> attachGameListener();
     inSeason.onchange = ()=> attachGameListener();
 
@@ -214,8 +225,8 @@
     async function savePick(gameId, label){
       const season = String(inSeason.value);
       const week   = String(selWeek.value);
-      await setDoc(doc(db,'seasons',season,'weeks',week,'picks', `${currentUser.uid}_${gameId}`), {
-        userId: currentUser.uid,
+      await setDoc(doc(db,'seasons',season,'weeks',week,'picks', `${currentUser?.uid}_${gameId}`), {
+        userId: currentUser?.uid,
         gameId,
         pick: label,
         updatedAt: ts(),
@@ -245,7 +256,7 @@
         tdKick.textContent = koDate.toLocaleString();
         tr.appendChild(tdKick);
 
-        // Dropdown pick
+        // --- Your Pick (dropdown, Home/Away only — no TIE) ---
         const tdPick=document.createElement('td');
         const select=document.createElement('select');
         ['', g.home, g.away].forEach(v=>{
@@ -261,7 +272,7 @@
         select.title = locked ? 'Locked at kickoff' : '';
         select.onchange = async ()=>{
           const label = select.value;
-          if (!label) return;
+          if (!label) return; // ignore placeholder
           await savePick(g.id, label);
         };
         tdPick.appendChild(select);
