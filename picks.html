@@ -32,10 +32,6 @@
     tbody tr:hover{background:#0f1430}
     .pill{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1130;color:#c7d0ff}
     .winner{font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:#101542;color:#c7d0ff;margin-left:8px}
-    .pickRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-    .pickBtn{border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:#0e1226;cursor:pointer;user-select:none}
-    .pickBtn[aria-pressed="true"]{outline:2px solid var(--accent);background:#182055}
-    .pickBtn.locked{opacity:.55;cursor:not-allowed}
     .status-ok{color:var(--ok)}
     .status-bad{color:var(--danger)}
   </style>
@@ -71,7 +67,7 @@
       </div>
       <div class="row">
         <button id="btnReload" class="ghost">Reload</button>
-        <span class="hint">Tap a team under each matchup to make your pick. Picks lock at kickoff.</span>
+        <span class="hint">Picks lock at kickoff. Choose carefully!</span>
       </div>
     </section>
 
@@ -84,8 +80,9 @@
         <thead>
           <tr>
             <th style="width:36px">#</th>
-            <th>Matchup & Your Pick</th>
-            <th style="width:210px">Kickoff</th>
+            <th>Matchup</th>
+            <th style="width:200px">Kickoff</th>
+            <th style="width:180px">Your Pick</th>
             <th style="width:160px">Status</th>
           </tr>
         </thead>
@@ -102,7 +99,7 @@
       createUserWithEmailAndPassword, signOut
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
-      getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp
+      getFirestore, collection, doc, setDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     // ---- Firebase config (your project) ----
@@ -163,7 +160,6 @@
         who.textContent = u.email || u.uid;
         authForm.style.display='none';
         btnSignOut.style.display='inline-block';
-        // ensure /users doc exists (optional)
         await setDoc(doc(db,'users',u.uid), { displayName: (u.email||'').split('@')[0], updatedAt: ts() }, { merge:true });
         attachGameListener();
       } else {
@@ -231,7 +227,6 @@
     function renderGames(games){
       clearTable(tblGamesBody);
       let correct=0, total=0;
-      const now = Date.now();
 
       games.forEach((g, i)=>{
         const tr=document.createElement('tr');
@@ -239,47 +234,38 @@
         // #
         const tdIdx=document.createElement('td'); tdIdx.textContent=String(i+1); tr.appendChild(tdIdx);
 
-        // Matchup + clickable pick buttons
+        // Matchup
         const tdMatch=document.createElement('td');
-        const top = document.createElement('div');
-        top.innerHTML = `<span class="pill">${g.away}</span> @ <span class="pill">${g.home}</span>` + (g.winner ? `<span class="winner">Winner: ${g.winner}</span>` : '');
-        tdMatch.appendChild(top);
-
-        const koDate = g.kickoff?.toDate ? g.kickoff.toDate() : new Date(g.kickoff);
-        const locked = koDate.getTime() <= now;
-
-        const picksRow = document.createElement('div');
-        picksRow.className = 'pickRow';
-
-        const choices = [g.away, g.home]; // add 'TIE' if you want: choices.push('TIE')
-        const chosen = myPicks.get(g.id) || '';
-
-        choices.forEach(label=>{
-          const btn = document.createElement('button');
-          btn.className = 'pickBtn';
-          btn.type = 'button';
-          btn.textContent = label;
-          btn.setAttribute('aria-pressed', String(chosen === label));
-          if (locked) btn.classList.add('locked');
-
-          btn.onclick = async ()=>{
-            if (locked) return;
-            await savePick(g.id, label);
-            // update pressed state locally
-            [...picksRow.querySelectorAll('.pickBtn')].forEach(b=>b.setAttribute('aria-pressed','false'));
-            btn.setAttribute('aria-pressed','true');
-          };
-
-          picksRow.appendChild(btn);
-        });
-
-        tdMatch.appendChild(picksRow);
+        tdMatch.innerHTML = `<span class="pill">${g.away}</span> @ <span class="pill">${g.home}</span>` + (g.winner ? `<span class="winner">Winner: ${g.winner}</span>` : '');
         tr.appendChild(tdMatch);
 
         // Kickoff
         const tdKick=document.createElement('td');
+        const koDate = g.kickoff?.toDate ? g.kickoff.toDate() : new Date(g.kickoff);
         tdKick.textContent = koDate.toLocaleString();
         tr.appendChild(tdKick);
+
+        // Dropdown pick
+        const tdPick=document.createElement('td');
+        const select=document.createElement('select');
+        ['', g.home, g.away].forEach(v=>{
+          const o=document.createElement('option');
+          o.value=v;
+          o.textContent=v||'— select —';
+          select.appendChild(o);
+        });
+        const chosen = myPicks.get(g.id) || '';
+        select.value = chosen || '';
+        const locked = koDate.getTime() <= Date.now();
+        select.disabled = locked;
+        select.title = locked ? 'Locked at kickoff' : '';
+        select.onchange = async ()=>{
+          const label = select.value;
+          if (!label) return;
+          await savePick(g.id, label);
+        };
+        tdPick.appendChild(select);
+        tr.appendChild(tdPick);
 
         // Status
         const tdStatus=document.createElement('td');
@@ -287,7 +273,7 @@
           total++;
           const mine = myPicks.get(g.id);
           if (mine){
-            if (mine === g.winner || (mine==='TIE' && g.winner==='TIE')) {
+            if (mine === g.winner) {
               tdStatus.textContent = '✓ Correct';
               tdStatus.className = 'status-ok';
               correct++;
@@ -299,7 +285,7 @@
             tdStatus.textContent = '— (no pick)';
           }
         } else {
-          tdStatus.textContent = locked ? 'Locked (awaiting winner)' : 'Open';
+          tdStatus.textContent = select.disabled ? 'Locked (awaiting winner)' : 'Open';
         }
         tr.appendChild(tdStatus);
 
