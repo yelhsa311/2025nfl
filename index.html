@@ -198,7 +198,20 @@ const firebaseConfig = {
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    window.db = db; // 👈 makes it available globally
+    
+    let IS_ADMIN = false;
+    
+    async function detectAdmin(uid) {
+      try {
+        // requires read access to /admins/{uid} (we allowed this in rules)
+        const snap = await getDoc(doc(db, "admins", uid));
+        IS_ADMIN = snap.exists();
+      } catch (e) {
+        IS_ADMIN = false; // if any error, treat as non-admin
+      }
+      applyRoleUI();
+    }
+
     
     // -------- DOM (shared) --------
     const who = document.getElementById('who');
@@ -233,6 +246,36 @@ const firebaseConfig = {
       setTimeout(()=>URL.revokeObjectURL(url), 500);
     }
 
+    function applyRoleUI() {
+  const adminButtons = [
+    document.getElementById('btnAddGame'),
+    document.getElementById('btnClearGames'),
+    document.getElementById('btnResetWeekStandings'),
+    document.getElementById('btnFinalizeWeek')
+  ];
+
+  adminButtons.forEach(el => {
+    if (!el) return;
+    // choose one style:
+    // Hide completely:
+    // el.style.display = IS_ADMIN ? '' : 'none';
+
+    // Or disable visibly:
+    el.disabled = !IS_ADMIN;
+    el.title = IS_ADMIN ? '' : 'Admins only';
+    el.style.opacity = IS_ADMIN ? '1' : '0.6';
+    el.style.pointerEvents = IS_ADMIN ? 'auto' : 'none';
+  });
+
+  // Inputs for adding a game
+  ['home','away','kickoff'].forEach(id=>{
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = !IS_ADMIN;
+    el.title = IS_ADMIN ? '' : 'Admins only';
+  });
+}
+
     // Collections
     const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
     const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks'); // {userId, gameId, pick}
@@ -242,9 +285,22 @@ const firebaseConfig = {
 
     // -------- Auth --------
     onAuthStateChanged(auth, (u) => {
-      if (u){ who.textContent = u.email || u.uid; authForm.style.display='none'; btnSignOut.style.display='inline-block'; }
-      else { who.textContent = 'signed out'; authForm.style.display='grid'; btnSignOut.style.display='none'; }
+      if (u) {
+        who.textContent = u.email || u.uid;
+        document.getElementById('authForm').style.display = 'none';
+        btnSignOut.style.display = 'inline-block';
+    
+        detectAdmin(u.uid);        // 👈 check role and update UI
+      } else {
+        who.textContent = 'signed out';
+        document.getElementById('authForm').style.display = 'grid';
+        btnSignOut.style.display = 'none';
+    
+        IS_ADMIN = false;
+        applyRoleUI();             // 👈 lock things down on sign-out
+      }
     });
+
     btnSignIn.onclick = async ()=>{
       try{ await signInWithEmailAndPassword(auth, inEmail.value, inPass.value); authMsg.textContent='Signed in.'; }
       catch(e){ authMsg.textContent=e.message; }
