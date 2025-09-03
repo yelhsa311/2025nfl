@@ -342,6 +342,23 @@
     }
     console.log("Seeded", items.length, "games");
   };
+
+  // Delete all games for the current week
+window.clearGames = async function(){
+  if (!state.isAdmin){ console.warn("Admin only"); return; }
+  const col = collection(db, "weeks", state.weekId, "games");
+
+  // Grab all games in the current week
+  const snap = await getDocs(col);
+  let count = 0;
+  for (const d of snap.docs){
+    await deleteDoc(d.ref);
+    count++;
+  }
+  console.log("Cleared", count, "games for", state.weekId);
+  toast("Cleared " + count + " games");
+};
+
   window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
 </script>
 </body>
