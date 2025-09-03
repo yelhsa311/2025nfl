@@ -107,6 +107,11 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
+
+  window.auth = auth;
+  window.db = db;
+  window.ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"]; // <— your UID
+
   const el = s => document.querySelector(s);
   const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
 
@@ -122,6 +127,7 @@
     if (allowedEmails.length && !allowedEmails.includes(email)) return alert("Ask Ashley to add your email.");
     await createUserWithEmailAndPassword(auth, email, pass).catch(e=>alert(e.message));
   });
+  
 onAuthStateChanged(auth, async (user) => {
   state.user = user || null;
 
@@ -132,22 +138,24 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
 
-  // Header user box + sign out
+  // Header user info + sign out
   el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
   el("#signOutBtn").addEventListener("click", () => signOut(auth));
 
-  // ✅ Admin check uses the global list
+  // ✅ check admin using the global list
   state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
 
-  // Show/hide admin-only UI
+  // ✅ toggle admin-only controls
   document.querySelectorAll(".adminOnly").forEach(n => n.style.display = state.isAdmin ? "" : "none");
 
+  // show app + load data
   el("#auth").style.display = "none";
   el("#app").style.display = "block";
 
   await setupWeeks();
   await subscribeWeek();
 });
+
 
 
   // ---------- WEEKS ----------
