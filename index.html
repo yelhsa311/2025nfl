@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Family NFL Picks</title>
-<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes" />
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--accent:#6ea8ff;--bad:#ff6b6b;--border:#252a33}
   body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
@@ -21,7 +21,7 @@
   .muted{color:var(--muted)}
   .danger{color:var(--bad)}
   .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
-  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
   .toast.show{opacity:1}
   .adminOnly{display:none}
   .lock{padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
@@ -38,22 +38,23 @@
   <!-- Auth -->
   <div id="auth" class="card">
     <div class="row">
-      <input id="email" type="email" placeholder="Email">
-      <input id="pass" type="password" placeholder="Password">
+      <input id="email" type="email" placeholder="Email" />
+      <input id="pass" type="password" placeholder="Password" />
       <button id="signInBtn" class="primary">Sign in</button>
       <button id="registerBtn">Register</button>
     </div>
     <div class="muted" style="margin-top:6px">Only invited family should register.</div>
   </div>
 
-  <!-- Main -->
+  <!-- Main App -->
   <div id="app" class="card" style="display:none">
     <div class="row">
       <label>Week:</label>
       <select id="weekSelect"></select>
       <span id="lockBadge" class="lock muted">…</span>
+      <!-- Admin lock toggle -->
       <span class="pill adminOnly">
-        <input id="adminWeekLock" type="checkbox"> Lock week
+        <input id="adminWeekLock" type="checkbox" /> Lock week
       </span>
     </div>
 
@@ -65,12 +66,14 @@
     <div class="card">
       <div class="bar">
         <div class="muted">Your picks autosave</div>
+        <!-- Admin add game button -->
         <button id="addGameBtn" class="adminOnly">+ Add game</button>
       </div>
+      <!-- Admin add panel -->
       <div class="adminOnly" id="adminAddPanel" style="display:none;margin-top:8px">
         <div class="row">
-          <input id="homeTeam" placeholder="Home team (e.g., Cowboys)">
-          <input id="awayTeam" placeholder="Away team (e.g., Eagles)">
+          <input id="homeTeam" placeholder="Home team (e.g., Cowboys)" />
+          <input id="awayTeam" placeholder="Away team (e.g., Eagles)" />
           <button id="saveGameBtn" class="primary">Save game</button>
         </div>
       </div>
@@ -80,13 +83,19 @@
   <div class="toast" id="toast">Saved!</div>
 </div>
 
-<!-- Firebase CDN -->
+<!-- Firebase (ESM) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { initializeFirestore, getFirestore, doc, setDoc, onSnapshot, collection, addDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  import { 
+    getAuth, onAuthStateChanged, signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, signOut 
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { 
+    initializeFirestore, getFirestore, doc, setDoc, onSnapshot, 
+    collection, addDoc, query, orderBy 
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // ---------- CONFIG ----------
+  // ---------- FIREBASE CONFIG (yours) ----------
   const firebaseConfig = {
     apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
     authDomain: "nflpicks2025-51202.firebaseapp.com",
@@ -97,80 +106,87 @@
     measurementId: "G-289KXJQZGG"
   };
 
-  const allowedEmails = [
-    // Optional: add your family’s emails here to restrict registration
-    // "ashley@example.com","brent@example.com"
-  ];
-  window.ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"];
-
   // ---------- INIT ----------
+  const app = initializeApp(firebaseConfig);
+  // Fix Safari/CORS by using long-polling transport
   initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
   const auth = getAuth(app);
   const db = getFirestore(app);
 
+  // Expose for console/debug + set admin UID list
   window.auth = auth;
   window.db = db;
-  window.ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"]; // <— your UID
+  window.ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"]; // <-- your admin UID
 
   const el = s => document.querySelector(s);
   const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
 
+  const allowedEmails = [
+    // Optional: add a whitelist like "you@example.com"
+  ];
+
   const state = { user: null, isAdmin: false, weekId: "2025-Week-01", lock: false, picks: {}, games: [] };
 
-  // ---------- AUTH ----------
+  // ---------- AUTH BUTTON HANDLERS ----------
   el("#signInBtn").addEventListener("click", async () => {
-    const email = el("#email").value.trim(), pass = el("#pass").value;
-    await signInWithEmailAndPassword(auth, email, pass).catch(e=>alert(e.message));
+    const email = el("#email").value.trim();
+    const pass  = el("#pass").value;
+    try { await signInWithEmailAndPassword(auth, email, pass); }
+    catch (e) { alert(e.message); }
   });
+
   el("#registerBtn").addEventListener("click", async () => {
-    const email = el("#email").value.trim(), pass = el("#pass").value;
-    if (allowedEmails.length && !allowedEmails.includes(email)) return alert("Ask Ashley to add your email.");
-    await createUserWithEmailAndPassword(auth, email, pass).catch(e=>alert(e.message));
+    const email = el("#email").value.trim();
+    const pass  = el("#pass").value;
+    if (Array.isArray(allowedEmails) && allowedEmails.length && !allowedEmails.includes(email)) {
+      alert("Ask Ashley to add your email.");
+      return;
+    }
+    try { await createUserWithEmailAndPassword(auth, email, pass); }
+    catch (e) { alert(e.message); }
   });
-  
-onAuthStateChanged(auth, async (user) => {
-  state.user = user || null;
 
-  if (!user){
-    el("#auth").style.display = "block";
-    el("#app").style.display = "none";
-    el("#userBox").innerHTML = "";
-    return;
-  }
+  // ---------- AUTH STATE ----------
+  onAuthStateChanged(auth, async (user) => {
+    state.user = user || null;
 
-  // Header user info + sign out
-  el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
-  el("#signOutBtn").addEventListener("click", () => signOut(auth));
+    if (!user){
+      el("#auth").style.display = "block";
+      el("#app").style.display  = "none";
+      el("#userBox").innerHTML  = "";
+      return;
+    }
 
-  // ✅ check admin using the global list
-  state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
-  
-// Unhide admin-only controls (keep the add panel collapsed by default)
-document.querySelectorAll(".adminOnly").forEach(n => {
-  if (n.id === "adminAddPanel") {
-    n.style.display = "none";                // stays hidden until you click + Add game
-  } else {
-    n.style.display = state.isAdmin ? "" : "none";
-  }
-});
+    // Header user info + sign out
+    el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
+    el("#signOutBtn").addEventListener("click", () => signOut(auth));
 
+    // Admin check + toggle admin-only controls
+    state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
+    document.querySelectorAll(".adminOnly").forEach(n => {
+      if (n.id === "adminAddPanel") n.style.display = "none"; // keep panel collapsed until +Add
+      else n.style.display = state.isAdmin ? "" : "none";
+    });
 
-  // show app + load data
-  el("#auth").style.display = "none";
-  el("#app").style.display = "block";
+    // Show app + load
+    el("#auth").style.display = "none";
+    el("#app").style.display  = "block";
 
-  await setupWeeks();
-  await subscribeWeek();
-});
-
-
+    await setupWeeks();
+    await subscribeWeek();
+  });
 
   // ---------- WEEKS ----------
   async function setupWeeks(){
-    const sel = el("#weekSelect"); sel.innerHTML="";
-    for (let i=1;i<=18;i++){ const id=`2025-Week-${String(i).padStart(2,"0")}`; const o=document.createElement("option"); o.value=id; o.textContent=`Week ${i}`; sel.appendChild(o); }
+    const sel = el("#weekSelect"); sel.innerHTML = "";
+    for (let i=1;i<=18;i++){
+      const id = `2025-Week-${String(i).padStart(2,"0")}`;
+      const o = document.createElement("option");
+      o.value = id; o.textContent = `Week ${i}`;
+      sel.appendChild(o);
+    }
     sel.value = state.weekId;
-    sel.addEventListener("change", () => { state.weekId = sel.value; subscribeWeek(true); });
+    sel.addEventListener("change", () => { state.weekId = sel.value; subscribeWeek(); });
   }
 
   let unsubGames=null, unsubLock=null, unsubMyPicks=null;
@@ -178,7 +194,8 @@ document.querySelectorAll(".adminOnly").forEach(n => {
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
 
-    const lockRef = doc(db,"weeks",state.weekId,"meta","lock");
+    // Lock doc
+    const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
     unsubLock = onSnapshot(lockRef, s => {
       state.lock = s.exists() ? !!s.data().locked : false;
       el("#lockBadge").textContent = state.lock ? "Locked" : "Open";
@@ -191,26 +208,29 @@ document.querySelectorAll(".adminOnly").forEach(n => {
       await setDoc(lockRef, { locked: e.target.checked }, { merge:true });
     };
 
-    const gamesCol = collection(db,"weeks",state.weekId,"games");
+    // Games
+    const gamesCol = collection(db, "weeks", state.weekId, "games");
     unsubGames = onSnapshot(query(gamesCol, orderBy("createdAt","asc")), snap => {
-      state.games = []; snap.forEach(d=>state.games.push({ id:d.id, ...d.data() }));
-      el("#noGames").style.display = state.games.length ? "none":"";
+      state.games = []; snap.forEach(d => state.games.push({ id: d.id, ...d.data() }));
+      el("#noGames").style.display = state.games.length ? "none" : "";
       renderGames();
     });
 
-    const myPicksRef = doc(db,"picks",state.user.uid,"weeks",state.weekId);
-    unsubMyPicks = onSnapshot(myPicksRef, snap => {
+    // Your picks
+    const picksRef = doc(db, "picks", state.user.uid, "weeks", state.weekId);
+    unsubMyPicks = onSnapshot(picksRef, snap => {
       state.picks = snap.exists() ? (snap.data().picks || {}) : {};
       renderGames();
     });
   }
 
+  // ---------- RENDER ----------
   function renderGames(){
-    const list = el("#gameList"); list.innerHTML="";
+    const list = el("#gameList"); list.innerHTML = "";
     state.games.forEach(g => {
-      const row = document.createElement("div"); row.className="match grid";
+      const row  = document.createElement("div"); row.className="match grid";
       const home = document.createElement("button"); home.className="team"; home.textContent=g.home;
-      const vs = Object.assign(document.createElement("div"), {innerHTML:'<span class="muted">vs</span>', style:"text-align:center"});
+      const vs   = Object.assign(document.createElement("div"), {innerHTML:'<span class="muted">vs</span>', style:"text-align:center"});
       const away = document.createElement("button"); away.className="team"; away.textContent=g.away;
 
       if (state.picks[g.id]==="home") home.classList.add("winner");
@@ -225,32 +245,41 @@ document.querySelectorAll(".adminOnly").forEach(n => {
       list.appendChild(row);
     });
 
-    el("#addGameBtn").onclick = () => { const p=el("#adminAddPanel"); p.style.display = p.style.display ? "" : "none"; };
+    // Admin add UI
+    el("#addGameBtn").onclick = () => {
+      const p = el("#adminAddPanel");
+      p.style.display = (p.style.display === "none" || !p.style.display) ? "" : "none";
+    };
     el("#saveGameBtn").onclick = saveGame;
   }
 
   async function choose(gameId, side){
     if (state.lock && !state.isAdmin) return;
     state.picks[gameId] = side;
-    const ref = doc(db,"picks",state.user.uid,"weeks",state.weekId);
-    await setDoc(ref,{ picks: state.picks, updatedAt: Date.now() },{ merge:true });
+    const ref = doc(db, "picks", state.user.uid, "weeks", state.weekId);
+    await setDoc(ref, { picks: state.picks, updatedAt: Date.now() }, { merge:true });
     toast();
     renderGames();
   }
 
   async function saveGame(){
     if (!state.isAdmin) return;
-    const home = el("#homeTeam").value.trim(), away = el("#awayTeam").value.trim();
+    const home = el("#homeTeam").value.trim();
+    const away = el("#awayTeam").value.trim();
     if (!home || !away) return alert("Enter both team names.");
-    await addDoc(collection(db,"weeks",state.weekId,"games"), { home, away, createdAt: Date.now() });
-    el("#homeTeam").value=""; el("#awayTeam").value=""; toast("Game added");
+    await addDoc(collection(db, "weeks", state.weekId, "games"), { home, away, createdAt: Date.now() });
+    el("#homeTeam").value=""; el("#awayTeam").value="";
+    toast("Game added");
   }
 
-  // Utilities for console
+  // ---------- Utilities for console ----------
   window.seedWeek1 = async function(pairs){
     if (!state.isAdmin){ console.warn("Admin only"); return; }
     const col = collection(db,"weeks",state.weekId,"games");
-    for (const p of pairs){ const [home,away]=p.split(" vs ").map(s=>s.trim()); if (home&&away){ await addDoc(col,{home,away,createdAt:Date.now()}); } }
+    for (const p of pairs){
+      const [home,away] = p.split(" vs ").map(s=>s.trim());
+      if (home && away){ await addDoc(col, { home, away, createdAt: Date.now() }); }
+    }
     console.log("Seeded", pairs.length, "games");
   };
   window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
