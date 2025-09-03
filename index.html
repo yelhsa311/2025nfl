@@ -144,9 +144,11 @@ onAuthStateChanged(auth, async (user) => {
 
   // ✅ check admin using the global list
   state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
-
-  // ✅ toggle admin-only controls
-  document.querySelectorAll(".adminOnly").forEach(n => n.style.display = state.isAdmin ? "" : "none");
+  
+  // ✅ unhide admin-only controls immediately
+  document.querySelectorAll(".adminOnly").forEach(
+    n => n.style.display = state.isAdmin ? "" : "none"
+  );
 
   // show app + load data
   el("#auth").style.display = "none";
