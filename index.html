@@ -23,7 +23,15 @@
   .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
   .toast.show{opacity:1}
-  .adminOnly{display:none}
+  /* admin controls are hidden by default */
+  .adminOnly{ display:none }
+  
+  /* when body has is-admin, show admin controls */
+  .is-admin .adminOnly{ display:inline-block !important }
+  
+  /* keep the add panel collapsed until button is clicked */
+  #adminAddPanel.adminOnly{ display:none !important }
+
   .lock{padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
   .disabled{opacity:.6;pointer-events:none}
 </style>
@@ -163,6 +171,7 @@
 
     // Admin check + toggle admin-only controls
     state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
+    document.body.classList.toggle('is-admin', state.isAdmin);
     document.querySelectorAll(".adminOnly").forEach(n => {
       if (n.id === "adminAddPanel") n.style.display = "none"; // keep panel collapsed until +Add
       else n.style.display = state.isAdmin ? "" : "none";
