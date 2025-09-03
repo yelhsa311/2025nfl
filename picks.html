@@ -139,6 +139,53 @@
     const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
     const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks');
 
+    // --- Replace your existing auth handlers with these ---
+async function doSignIn() {
+  const msgEl = document.getElementById('authMsg');
+  try {
+    await signInWithEmailAndPassword(auth, inEmail.value.trim(), inPass.value);
+    msgEl.textContent = 'Signed in.';
+  } catch (e) {
+    console.error(e);
+    msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
+  }
+}
+
+async function doCreate() {
+  const msgEl = document.getElementById('authMsg');
+  const email = inEmail.value.trim();
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, inPass.value);
+    await setDoc(doc(db,'users',cred.user.uid), {
+      displayName: email.split('@')[0],
+      createdAt: serverTimestamp()
+    }, { merge:true });
+    msgEl.textContent = 'Account created.';
+  } catch (e) {
+    console.error(e);
+    if (e.code === 'auth/email-already-in-use') {
+      msgEl.textContent = 'Account already exists — signing you in…';
+      // fallback: try sign-in with the same creds
+      try {
+        await signInWithEmailAndPassword(auth, email, inPass.value);
+        msgEl.textContent = 'Signed in.';
+      } catch (e2) {
+        console.error(e2);
+        msgEl.textContent = `${e2.code || 'error'}: ${e2.message || e2}`;
+      }
+    } else {
+      msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
+    }
+  }
+}
+
+// Bind both programmatically and via inline as a belt-and-suspenders approach
+window._signin = doSignIn;
+window._create = doCreate;
+document.getElementById('btnSignIn')?.addEventListener('click', doSignIn);
+document.getElementById('btnCreate')?.addEventListener('click', doCreate);
+
+    
     // ---- Expose bulletproof auth handlers (so clicks always work)
     window._signin = async () => {
       const msgEl = document.getElementById('authMsg');
