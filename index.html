@@ -178,6 +178,10 @@
       deleteDoc, onSnapshot, query, orderBy, writeBatch, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
+    window.addDoc = addDoc;
+    window.collection = collection;
+    window.serverTimestamp = serverTimestamp;
+
     // -------- Your Firebase Config --------
 const firebaseConfig = {
   apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
