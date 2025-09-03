@@ -194,7 +194,8 @@ const firebaseConfig = {
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-
+    window.db = db; // 👈 makes it available globally
+    
     // -------- DOM (shared) --------
     const who = document.getElementById('who');
     const btnSignOut = document.getElementById('btnSignOut');
