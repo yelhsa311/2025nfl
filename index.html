@@ -101,7 +101,7 @@
     // Optional: add your family’s emails here to restrict registration
     // "ashley@example.com","brent@example.com"
   ];
-  let ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"];
+  window.ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"];
 
   // ---------- INIT ----------
   const app = initializeApp(firebaseConfig);
@@ -128,7 +128,7 @@
     if (!user){ el("#auth").style.display="block"; el("#app").style.display="none"; el("#userBox").innerHTML=""; return; }
     el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
     el("#signOutBtn").addEventListener("click", () => signOut(auth));
-    state.isAdmin = ADMIN_UIDS.includes(user.uid);
+    state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
     document.querySelectorAll(".adminOnly").forEach(n => n.style.display = state.isAdmin ? "" : "none");
     el("#auth").style.display="none"; el("#app").style.display="block";
     await setupWeeks(); await subscribeWeek();
