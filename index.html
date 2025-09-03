@@ -5,164 +5,169 @@
   <title>NFL Picks • Admin</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root {
-      --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d;
-      --border:#2a2f47;
+    :root{
+      --bg:#0f1220;--card:#171a2b;--muted:#8fa0ff;--text:#e9ecff;--accent:#4c73ff;--danger:#ff6b6b;--ok:#31c48d;--border:#2a2f47
     }
     *{box-sizing:border-box}
     body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
-    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:#0e1120;position:sticky;top:0;z-index:2}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:#0e1120;position:sticky;top:0;z-index:3}
     h1{margin:0;font-size:18px;letter-spacing:.4px}
     .muted{color:#aeb6ff9c}
-    main{display:grid;gap:16px;padding:16px;grid-template-columns: 360px 1fr}
-    @media (max-width:1000px){main{grid-template-columns:1fr}}
+    .badge{font-size:12px;padding:3px 7px;border:1px solid var(--border);border-radius:8px;background:#0e1330}
+    .tabs{display:flex;gap:6px;padding:8px 8px 0;border-bottom:1px solid var(--border);background:#0e1120;position:sticky;top:54px;z-index:2}
+    .tab{padding:8px 12px;border:1px solid var(--border);border-bottom:none;border-radius:10px 10px 0 0;background:#0e1226;cursor:pointer}
+    .tab.active{background:#141944}
+    main{padding:16px}
+    .sheet{display:none}
+    .sheet.active{display:block}
+    .layout{display:grid;gap:16px;grid-template-columns:360px 1fr}
+    @media (max-width:1000px){.layout{grid-template-columns:1fr}}
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
     .card h2{margin:0 0 8px;font-size:16px}
     .row{display:flex;gap:8px;flex-wrap:wrap}
+    .stack{display:grid;gap:10px}
+    .grid{display:grid;gap:8px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
     input,select,button{background:#0e1226;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
-    input,select{flex:1}
     button{cursor:pointer}
     button.primary{background:var(--accent);border-color:#2b4bd8}
     button.ghost{background:transparent}
     button.danger{background:var(--danger);border-color:#d14a4a;color:#fff}
     button.ok{background:var(--ok);border-color:#1a9b6f;color:#00140d}
-    .stack{display:grid;gap:8px}
-    .grid{display:grid;gap:8px}
-    .grid.cols-2{grid-template-columns:1fr 1fr}
-    .grid.cols-3{grid-template-columns:1fr 1fr 1fr}
+    .hint{font-size:12px;color:#aeb6ff9c}
+    .sep{height:1px;background:var(--border);margin:8px 0}
     table{width:100%;border-collapse:collapse;background:#0e1226;border:1px solid var(--border);border-radius:10px;overflow:hidden}
     th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
     th{background:#0b0f1f;color:#b7c0ff}
     tbody tr:hover{background:#0f1430}
-    .right{margin-left:auto}
     .pill{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1130;color:#c7d0ff}
-    .hint{font-size:12px;color:#aeb6ff9c}
-    .sep{height:1px;background:var(--border);margin:8px 0}
-    .danger-text{color:var(--danger)}
-    .ok-text{color:var(--ok)}
-    .badge{font-size:12px;padding:3px 7px;border:1px solid var(--border);border-radius:8px;background:#0e1330}
-    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   </style>
 </head>
 <body>
   <header>
     <h1>🏈 NFL Picks Admin <span class="muted">· Firestore</span></h1>
-    <div id="authArea" class="flex">
+    <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
       <button id="btnSignOut" class="ghost" style="display:none">Sign out</button>
     </div>
   </header>
 
+  <nav class="tabs">
+    <button class="tab active" data-sheet="gamesSheet">Games</button>
+    <button class="tab" data-sheet="standingsSheet">Standings</button>
+  </nav>
+
   <main>
-    <!-- LEFT: Controls -->
-    <section class="card stack">
-      <h2>Setup</h2>
-      <div class="stack">
-        <div class="grid cols-2">
-          <select id="selWeek" title="Week"></select>
-          <input id="inSeason" placeholder="Season (e.g. 2025)" />
-        </div>
-        <div class="row">
-          <button id="btnReload" class="ghost">Reload</button>
-          <span class="hint">Choose week + season first.</span>
-        </div>
+    <!-- GAMES SHEET -->
+    <section id="gamesSheet" class="sheet active">
+      <div class="layout">
+        <section class="card stack">
+          <h2>Setup</h2>
+          <div class="stack">
+            <div class="grid cols-2">
+              <select id="selWeek"></select>
+              <input id="inSeason" placeholder="Season (e.g. 2025)" />
+            </div>
+            <div class="row">
+              <button id="btnReload" class="ghost">Reload</button>
+              <span class="hint">Choose week + season first.</span>
+            </div>
+          </div>
+
+          <div class="sep"></div>
+
+          <h2>Auth</h2>
+          <div id="authForm" class="stack">
+            <input id="inEmail" type="email" placeholder="email@example.com" />
+            <input id="inPass" type="password" placeholder="password" />
+            <div class="row">
+              <button id="btnSignIn" class="primary">Sign in</button>
+              <button id="btnCreate" class="ghost">Create user</button>
+            </div>
+            <div id="authMsg" class="hint"></div>
+          </div>
+
+          <div class="sep"></div>
+
+          <h2>Add Game</h2>
+          <div class="stack">
+            <div class="grid cols-2">
+              <input id="home" placeholder="Home team" />
+              <input id="away" placeholder="Away team" />
+            </div>
+            <input id="kickoff" type="datetime-local" />
+            <button id="btnAddGame" class="primary">Add game</button>
+            <div class="hint">Stored at <code>seasons/{season}/weeks/{week}/games</code></div>
+          </div>
+
+          <div class="sep"></div>
+
+          <h2>Danger Zone</h2>
+          <div class="row">
+            <button id="btnClearGames" class="danger">Clear Games (week)</button>
+            <button id="btnResetWeekStandings" class="ghost" style="color:#ffb0b0">Reset Week Standings</button>
+          </div>
+        </section>
+
+        <section class="stack">
+          <div class="card stack">
+            <div class="row" style="justify-content:space-between;align-items:center">
+              <h2 style="margin:0">Games</h2>
+              <button id="btnFinalizeWeek" class="ok">Finalize Week</button>
+            </div>
+            <div class="hint">Pick a winner for each game, then click <b>Finalize Week</b> to compute standings.</div>
+            <table id="tblGames">
+              <thead>
+                <tr><th>#</th><th>Matchup</th><th>Kickoff</th><th>Winner</th><th>Saved</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
       </div>
-
-      <div class="sep"></div>
-
-      <h2>Auth</h2>
-      <div id="authForm" class="stack">
-        <input id="inEmail" type="email" placeholder="email@example.com" />
-        <input id="inPass" type="password" placeholder="password" />
-        <div class="row">
-          <button id="btnSignIn" class="primary">Sign in</button>
-          <button id="btnCreate" class="ghost">Create user</button>
-        </div>
-        <div id="authMsg" class="hint"></div>
-      </div>
-
-      <div class="sep"></div>
-
-      <h2>Add Game</h2>
-      <div class="stack">
-        <div class="grid cols-2">
-          <input id="home" placeholder="Home team" />
-          <input id="away" placeholder="Away team" />
-        </div>
-        <input id="kickoff" type="datetime-local" />
-        <button id="btnAddGame" class="primary">Add game</button>
-        <div class="hint">Games are stored under <code>seasons/{season}/weeks/{week}/games</code>.</div>
-      </div>
-
-      <div class="sep"></div>
-
-      <h2>Danger Zone</h2>
-      <div class="row">
-        <button id="btnClearGames" class="danger">Clear Games (week)</button>
-        <button id="btnResetWeekStandings" class="ghost danger-text">Reset Week Standings</button>
-      </div>
-      <div class="hint">Clears all games for the selected week (and any computed week standings).</div>
     </section>
 
-    <!-- RIGHT: Data -->
-    <section class="stack">
-      <div class="card stack">
-        <div class="flex">
-          <h2 style="margin-right:auto">Games</h2>
-          <button id="btnFinalizeWeek" class="ok">Finalize Week</button>
+    <!-- STANDINGS SHEET -->
+    <section id="standingsSheet" class="sheet">
+      <div class="stack">
+        <div class="card stack">
+          <div class="row" style="align-items:center;justify-content:space-between">
+            <div class="row">
+              <h2 style="margin:0">Per-Week Standings</h2>
+              <select id="selWeekStandings" title="Week"></select>
+              <input id="inSeasonStandings" placeholder="Season (e.g. 2025)" />
+              <button id="btnRefreshStandings" class="ghost">Refresh</button>
+            </div>
+            <button id="btnExportWeekCSV" class="ghost">Export CSV</button>
+          </div>
+          <div class="hint">Lists <b>everyone</b> (even users with no picks) for the selected week.</div>
+          <table id="tblWeek">
+            <thead>
+              <tr><th>User</th><th>Correct</th><th>Total</th><th>%</th><th>Last Updated</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
-        <div class="hint">Set the winner for each game, then click <b>Finalize Week</b> to compute standings.</div>
-        <table id="tblGames">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Matchup</th>
-              <th>Kickoff (local)</th>
-              <th>Winner</th>
-              <th>Saved</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
 
-      <div class="card stack">
-        <h2>Per-Week Standings</h2>
-        <table id="tblWeek">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Correct</th>
-              <th>Total</th>
-              <th>%</th>
-              <th>Last Updated</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <div class="card stack">
-        <h2>Overall Standings (Season)</h2>
-        <table id="tblOverall">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Correct</th>
-              <th>Total</th>
-              <th>%</th>
-              <th>Last Updated</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="card stack">
+          <div class="row" style="align-items:center;justify-content:space-between">
+            <h2 style="margin:0">Overall Standings (Season)</h2>
+            <button id="btnExportOverallCSV" class="ghost">Export CSV</button>
+          </div>
+          <table id="tblOverall">
+            <thead>
+              <tr><th>User</th><th>Correct</th><th>Total</th><th>%</th><th>Last Updated</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
   </main>
 
   <!-- Firebase (ESM) -->
   <script type="module">
-    // ------- Firebase Imports (modular) -------
+    // -------- Firebase Imports --------
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
       getAuth, onAuthStateChanged, signInWithEmailAndPassword,
@@ -170,10 +175,10 @@
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
       getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc,
-      deleteDoc, onSnapshot, query, where, orderBy, writeBatch, serverTimestamp
+      deleteDoc, onSnapshot, query, orderBy, writeBatch, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // ------- TODO: your Firebase project config -------
+    // -------- Your Firebase Config --------
     const firebaseConfig = {
       apiKey: "YOUR_KEY",
       authDomain: "YOUR_DOMAIN",
@@ -181,313 +186,336 @@
       appId: "YOUR_APP_ID",
     };
 
-    // ------- Init -------
+    // -------- Init --------
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // ------- DOM -------
-    const selWeek = document.getElementById('selWeek');
-    const inSeason = document.getElementById('inSeason');
-
+    // -------- DOM (shared) --------
+    const who = document.getElementById('who');
+    const btnSignOut = document.getElementById('btnSignOut');
+    const authForm = document.getElementById('authForm');
     const inEmail = document.getElementById('inEmail');
     const inPass  = document.getElementById('inPass');
     const btnSignIn = document.getElementById('btnSignIn');
     const btnCreate = document.getElementById('btnCreate');
-    const btnSignOut = document.getElementById('btnSignOut');
     const authMsg = document.getElementById('authMsg');
-    const who = document.getElementById('who');
 
+    // Tabs
+    document.querySelectorAll('.tab').forEach(btn=>{
+      btn.onclick = ()=>{
+        document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+        document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.sheet).classList.add('active');
+      };
+    });
+
+    // -------- Helpers --------
+    const fmtPct = (c, t) => t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—';
+    const ts = () => serverTimestamp();
+    function clearTable(tbody){ while (tbody.firstChild) tbody.removeChild(tbody.firstChild); }
+    function downloadCSV(filename, rows){
+      const esc = v => (v==null?'':String(v)).replaceAll('"','""');
+      const csv = rows.map(r=>r.map(esc).map(v=>'"'+v+'"').join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 500);
+    }
+
+    // Collections
+    const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
+    const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks'); // {userId, gameId, pick}
+    const colWeekStandings = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'standings'); // {userId, correct, total}
+    const colOverall = (season) => collection(db, 'seasons', season, 'overall');
+    const colUsers = () => collection(db, 'users'); // {displayName}
+
+    // -------- Auth --------
+    onAuthStateChanged(auth, (u) => {
+      if (u){ who.textContent = u.email || u.uid; authForm.style.display='none'; btnSignOut.style.display='inline-block'; }
+      else { who.textContent = 'signed out'; authForm.style.display='grid'; btnSignOut.style.display='none'; }
+    });
+    btnSignIn.onclick = async ()=>{
+      try{ await signInWithEmailAndPassword(auth, inEmail.value, inPass.value); authMsg.textContent='Signed in.'; }
+      catch(e){ authMsg.textContent=e.message; }
+    };
+    btnCreate.onclick = async ()=>{
+      try{
+        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
+        await setDoc(doc(db,'users',cred.user.uid), {displayName: inEmail.value.split('@')[0], createdAt: ts()}, {merge:true});
+        authMsg.textContent='User created & saved.';
+      } catch(e){ authMsg.textContent=e.message; }
+    };
+    btnSignOut.onclick = ()=>signOut(auth);
+
+    // -------- GAMES SHEET logic --------
+    const selWeek = document.getElementById('selWeek');
+    const inSeason = document.getElementById('inSeason');
     const btnReload = document.getElementById('btnReload');
     const btnAddGame = document.getElementById('btnAddGame');
     const btnClearGames = document.getElementById('btnClearGames');
     const btnResetWeekStandings = document.getElementById('btnResetWeekStandings');
     const btnFinalizeWeek = document.getElementById('btnFinalizeWeek');
-
     const home = document.getElementById('home');
     const away = document.getElementById('away');
     const kickoff = document.getElementById('kickoff');
-
     const tblGamesBody = document.querySelector('#tblGames tbody');
+
+    // Standings SHEET dom
+    const selWeekSt = document.getElementById('selWeekStandings');
+    const inSeasonSt = document.getElementById('inSeasonStandings');
+    const btnRefreshStandings = document.getElementById('btnRefreshStandings');
+    const btnExportWeekCSV = document.getElementById('btnExportWeekCSV');
+    const btnExportOverallCSV = document.getElementById('btnExportOverallCSV');
     const tblWeekBody = document.querySelector('#tblWeek tbody');
     const tblOverallBody = document.querySelector('#tblOverall tbody');
 
-    // ------- State -------
-    let unsubGames = null;
-    let unsubWeekStandings = null;
-    let unsubOverall = null;
-
-    // Populate weeks 1..18
-    for (let w = 1; w <= 18; w++) {
-      const opt = document.createElement('option');
-      opt.value = String(w).padStart(2, '0');
-      opt.textContent = `Week ${w}`;
-      selWeek.appendChild(opt);
+    // week options
+    for (let w=1; w<=18; w++){
+      const v = String(w).padStart(2,'0');
+      for (const sel of [selWeek, selWeekSt]){
+        const opt=document.createElement('option'); opt.value=v; opt.textContent='Week '+w; sel.appendChild(opt);
+      }
     }
-
-    // Sensible defaults
     inSeason.value = new Date().getFullYear();
     selWeek.value = "01";
+    inSeasonSt.value = inSeason.value;
+    selWeekSt.value = selWeek.value;
 
-    // ------- Helpers -------
-    const path = () => {
-      const season = (inSeason.value || '').trim();
-      const week = (selWeek.value || '').trim();
-      if (!season || !week) throw new Error('Season or Week missing');
-      return { season, week };
-    };
+    let unsubGames=null;
 
-    const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
-    const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks'); // user picks: {userId, gameId, pick}
-    const colWeekStandings = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'standings'); // {userId, correct, total, updatedAt}
-    const colOverallStandings = (season) => collection(db, 'seasons', season, 'overall'); // {userId, correct, total, updatedAt}
-    const colUsers = () => collection(db, 'users'); // {displayName}
-
-    const fmtPct = (c, t) => t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—';
-    const ts = () => serverTimestamp();
-
-    function clearTable(tbody) {
-      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    function currentPathGames(){
+      const season=(inSeason.value||'').trim();
+      const week=(selWeek.value||'').trim();
+      if(!season||!week) throw new Error('Season or Week missing');
+      return {season,week};
+    }
+    function currentPathStandings(){
+      const season=(inSeasonSt.value||'').trim();
+      const week=(selWeekSt.value||'').trim();
+      if(!season||!week) throw new Error('Season or Week missing');
+      return {season,week};
     }
 
-    // ------- Auth wiring -------
-    onAuthStateChanged(auth, (u) => {
-      if (u) {
-        who.textContent = u.email || u.uid;
-        document.getElementById('authForm').style.display = 'none';
-        btnSignOut.style.display = 'inline-block';
-      } else {
-        who.textContent = 'signed out';
-        document.getElementById('authForm').style.display = 'grid';
-        btnSignOut.style.display = 'none';
-      }
-    });
-
-    btnSignIn.onclick = async () => {
-      try {
-        await signInWithEmailAndPassword(auth, inEmail.value, inPass.value);
-        authMsg.textContent = 'Signed in.';
-      } catch (e) {
-        authMsg.textContent = e.message;
-      }
-    };
-    btnCreate.onclick = async () => {
-      try {
-        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
-        await setDoc(doc(db, 'users', cred.user.uid), { displayName: inEmail.value.split('@')[0], createdAt: ts() }, { merge: true });
-        authMsg.textContent = 'User created & saved.';
-      } catch (e) {
-        authMsg.textContent = e.message;
-      }
-    };
-    btnSignOut.onclick = () => signOut(auth);
-
-    // ------- Data listeners -------
-    async function attachListeners() {
-      const { season, week } = path();
-
-      // Games
-      if (unsubGames) unsubGames();
-      unsubGames = onSnapshot(query(colGames(season, week), orderBy('kickoff','asc')), (snap) => {
-        renderGames(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-
-      // Week standings
-      if (unsubWeekStandings) unsubWeekStandings();
-      unsubWeekStandings = onSnapshot(query(colWeekStandings(season, week), orderBy('correct','desc')), (snap) => {
-        renderStandings(tblWeekBody, snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-
-      // Overall standings
-      if (unsubOverall) unsubOverall();
-      unsubOverall = onSnapshot(query(colOverallStandings(season), orderBy('correct','desc')), (snap) => {
-        renderStandings(tblOverallBody, snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-    }
-
-    function renderGames(games) {
+    function renderGames(games){
       clearTable(tblGamesBody);
-      games.forEach((g, idx) => {
-        const tr = document.createElement('tr');
+      games.forEach((g, i)=>{
+        const tr=document.createElement('tr');
 
-        const tdIdx = document.createElement('td');
-        tdIdx.textContent = String(idx+1);
-        tr.appendChild(tdIdx);
+        const tdIdx=document.createElement('td'); tdIdx.textContent=String(i+1); tr.appendChild(tdIdx);
 
-        const tdMatch = document.createElement('td');
+        const tdMatch=document.createElement('td');
         tdMatch.innerHTML = `<span class="pill">${g.away}</span> @ <span class="pill">${g.home}</span>`;
         tr.appendChild(tdMatch);
 
-        const tdKick = document.createElement('td');
+        const tdKick=document.createElement('td');
         tdKick.textContent = g.kickoff?.toDate ? g.kickoff.toDate().toLocaleString() : new Date(g.kickoff).toLocaleString();
         tr.appendChild(tdKick);
 
-        const tdWinner = document.createElement('td');
-        const sel = document.createElement('select');
-        [ '', g.home, g.away, 'TIE' ].forEach(optV => {
-          const o = document.createElement('option');
-          o.value = optV;
-          o.textContent = optV || '— select winner —';
-          if (optV === g.winner) o.selected = true;
-          sel.appendChild(o);
+        const tdWinner=document.createElement('td');
+        const sel=document.createElement('select');
+        ['', g.home, g.away, 'TIE'].forEach(v=>{
+          const o=document.createElement('option'); o.value=v; o.textContent=v||'— select winner —';
+          if (v===g.winner) o.selected=true; sel.appendChild(o);
         });
-        sel.onchange = async () => {
-          const { season, week } = path();
-          await updateDoc(doc(db, 'seasons', season, 'weeks', week, 'games', g.id), {
-            winner: sel.value || null, updatedAt: ts()
-          });
+        sel.onchange = async ()=>{
+          const {season,week} = currentPathGames();
+          await updateDoc(doc(db,'seasons',season,'weeks',week,'games',g.id), {winner: sel.value || null, updatedAt: ts()});
         };
-        tdWinner.appendChild(sel);
-        tr.appendChild(tdWinner);
+        tdWinner.appendChild(sel); tr.appendChild(tdWinner);
 
-        const tdSaved = document.createElement('td');
-        tdSaved.textContent = g.winner ? '✓' : '';
-        tr.appendChild(tdSaved);
+        const tdSaved=document.createElement('td'); tdSaved.textContent = g.winner ? '✓' : ''; tr.appendChild(tdSaved);
 
         tblGamesBody.appendChild(tr);
       });
     }
 
-    function renderStandings(tbody, rows) {
+    async function attachGameListeners(){
+      const {season,week} = currentPathGames();
+      if (unsubGames) unsubGames();
+      unsubGames = onSnapshot(query(colGames(season,week), orderBy('kickoff','asc')), (snap)=>{
+        renderGames(snap.docs.map(d=>({id:d.id, ...d.data()})));
+      });
+    }
+
+    btnReload.onclick = attachGameListeners;
+    selWeek.onchange = ()=>{ selWeekSt.value = selWeek.value; attachGameListeners(); refreshStandings(); };
+    inSeason.onchange = ()=>{ inSeasonSt.value = inSeason.value; attachGameListeners(); refreshStandings(); };
+
+    btnAddGame.onclick = async ()=>{
+      const {season,week} = currentPathGames();
+      const hv=(home.value||'').trim(), av=(away.value||'').trim();
+      if (!hv||!av||!kickoff.value) return alert('Home, Away, and Kickoff are required.');
+      await addDoc(colGames(season,week), {home:hv, away:av, kickoff:new Date(kickoff.value), winner:null, createdAt:ts(), updatedAt:ts()});
+      home.value=''; away.value=''; kickoff.value='';
+    };
+
+    btnClearGames.onclick = async ()=>{
+      const {season,week} = currentPathGames();
+      if(!confirm(`Delete ALL games in Season ${season}, Week ${week}?`)) return;
+      const batch = writeBatch(db);
+      (await getDocs(colGames(season,week))).forEach(d=>batch.delete(d.ref));
+      (await getDocs(colWeekStandings(season,week))).forEach(d=>batch.delete(d.ref));
+      await batch.commit();
+      alert('Games and week standings cleared.');
+      await refreshStandings();
+    };
+
+    btnResetWeekStandings.onclick = async ()=>{
+      const {season,week} = currentPathGames();
+      const batch = writeBatch(db);
+      (await getDocs(colWeekStandings(season,week))).forEach(d=>batch.delete(d.ref));
+      await batch.commit();
+      alert('Week standings reset.');
+      await refreshStandings();
+    };
+
+    // Finalize week -> compute per-week + overall
+    btnFinalizeWeek.onclick = async ()=>{
+      const {season,week} = currentPathGames();
+
+      // Read games
+      const games=[]; (await getDocs(colGames(season,week))).forEach(d=>games.push({id:d.id,...d.data()}));
+      if(!games.length) return alert('No games to finalize.');
+      const unresolved = games.filter(g=>!g.winner);
+      if (unresolved.length && !confirm(`There are ${unresolved.length} games without a winner. Finalize anyway?`)) return;
+
+      // Read picks
+      const picks=[]; (await getDocs(colPicks(season,week))).forEach(d=>picks.push({id:d.id,...d.data()}));
+
+      // Read users so we can list *everyone*
+      const users = new Map();
+      (await getDocs(colUsers())).forEach(u=>users.set(u.id, {id:u.id, ...u.data()}));
+
+      // Group picks by user
+      const byUser = new Map();
+      for (const p of picks){
+        if (!byUser.has(p.userId)) byUser.set(p.userId, []);
+        byUser.get(p.userId).push(p);
+      }
+
+      // Compute week standings (include users with no picks as 0/0)
+      const batch = writeBatch(db);
+      const allUserIds = new Set([...users.keys(), ...byUser.keys()]);
+      for (const userId of allUserIds){
+        const userPicks = byUser.get(userId) || [];
+        let correct=0, total=0;
+        for (const p of userPicks){
+          const g = games.find(x=>x.id===p.gameId);
+          if (!g || !g.winner) continue;
+          total++;
+          if (p.pick === g.winner) correct++;
+          if (g.winner==='TIE' && p.pick==='TIE') correct++; // if you count ties as correct when picked
+        }
+        const u = users.get(userId) || {};
+        const displayName = u.displayName || u.name || u.email || userId;
+        const weekRef = doc(db,'seasons',season,'weeks',week,'standings',userId);
+        batch.set(weekRef, {userId, displayName, correct, total, updatedAt: ts()}, {merge:true});
+      }
+
+      // Compute overall: aggregate week standings across 1..18
+      const totals = new Map(); // userId -> {correct,total,displayName}
+      // Seed with all users so "everyone" appears even with 0
+      for (const [uid, u] of users.entries()){
+        totals.set(uid, {correct:0,total:0,displayName: u.displayName || u.name || u.email || uid});
+      }
+      for (let w=1; w<=18; w++){
+        const wk = String(w).padStart(2,'0');
+        const snap = await getDocs(colWeekStandings(season, wk));
+        snap.forEach(d=>{
+          const v=d.data();
+          if(!totals.has(v.userId)) totals.set(v.userId, {correct:0,total:0,displayName: v.displayName || v.userId});
+          const agg=totals.get(v.userId);
+          agg.correct += (v.correct||0);
+          agg.total   += (v.total||0);
+          if (!agg.displayName && v.displayName) agg.displayName = v.displayName;
+        });
+      }
+      // Write overall
+      for (const [userId, agg] of totals.entries()){
+        const ref = doc(db,'seasons',season,'overall',userId);
+        batch.set(ref, {userId, displayName: agg.displayName || userId, correct: agg.correct, total: agg.total, updatedAt: ts()}, {merge:true});
+      }
+
+      await batch.commit();
+      alert('Week finalized and standings updated.');
+      await refreshStandings(); // update “sheet”
+    };
+
+    // -------- STANDINGS SHEET logic --------
+    async function refreshStandings(){
+      const {season,week} = currentPathStandings();
+
+      // Load all users
+      const users = new Map();
+      (await getDocs(colUsers())).forEach(u=>users.set(u.id, {id:u.id, ...u.data()}));
+
+      // Week standings (ensure everyone shows)
+      const rows = new Map(); // userId -> row
+      (await getDocs(colWeekStandings(season,week))).forEach(d=>{
+        const v=d.data();
+        rows.set(v.userId, {userId:v.userId, displayName:v.displayName||v.userId, correct:v.correct||0, total:v.total||0, updatedAt:v.updatedAt});
+      });
+      // Fill missing users as 0/0
+      for (const [uid,u] of users.entries()){
+        if (!rows.has(uid)){
+          rows.set(uid, {userId:uid, displayName:u.displayName||u.name||u.email||uid, correct:0, total:0, updatedAt:null});
+        }
+      }
+      // Render week
+      const weekArr = [...rows.values()].sort((a,b)=> (b.correct/(b.total||1)) - (a.correct/(a.total||1)));
+      renderStandingsTable(tblWeekBody, weekArr);
+
+      // Overall standings (also ensure everyone shows)
+      const ovRows = new Map();
+      (await getDocs(colOverall(season))).forEach(d=>{
+        const v=d.data();
+        ovRows.set(v.userId, {userId:v.userId, displayName:v.displayName||v.userId, correct:v.correct||0, total:v.total||0, updatedAt:v.updatedAt});
+      });
+      for (const [uid,u] of users.entries()){
+        if (!ovRows.has(uid)){
+          ovRows.set(uid, {userId:uid, displayName:u.displayName||u.name||u.email||uid, correct:0, total:0, updatedAt:null});
+        }
+      }
+      const ovArr = [...ovRows.values()].sort((a,b)=> (b.correct/(b.total||1)) - (a.correct/(a.total||1)));
+      renderStandingsTable(tblOverallBody, ovArr);
+
+      // Hook up CSV exports
+      btnExportWeekCSV.onclick = ()=>{
+        const rows = [["User","Correct","Total","%","Last Updated"]];
+        weekArr.forEach(r=>rows.push([r.displayName, r.correct, r.total, fmtPct(r.correct,r.total), r.updatedAt?.toDate ? r.updatedAt.toDate().toISOString() : ""]));
+        downloadCSV(`standings_week_${season}_${week}.csv`, rows);
+      };
+      btnExportOverallCSV.onclick = ()=>{
+        const rows = [["User","Correct","Total","%","Last Updated"]];
+        ovArr.forEach(r=>rows.push([r.displayName, r.correct, r.total, fmtPct(r.correct,r.total), r.updatedAt?.toDate ? r.updatedAt.toDate().toISOString() : ""]));
+        downloadCSV(`standings_overall_${season}.csv`, rows);
+      };
+    }
+
+    function renderStandingsTable(tbody, arr){
       clearTable(tbody);
-      rows.forEach(r => {
-        const tr = document.createElement('tr');
-        const pct = fmtPct(r.correct || 0, r.total || 0);
+      arr.forEach(r=>{
+        const tr=document.createElement('tr');
         tr.innerHTML = `
-          <td>${r.displayName || r.userEmail || r.userId || '—'}</td>
-          <td>${r.correct ?? 0}</td>
-          <td>${r.total ?? 0}</td>
-          <td>${pct}</td>
+          <td>${r.displayName}</td>
+          <td>${r.correct}</td>
+          <td>${r.total}</td>
+          <td>${fmtPct(r.correct, r.total)}</td>
           <td>${r.updatedAt?.toDate ? r.updatedAt.toDate().toLocaleString() : ''}</td>
         `;
         tbody.appendChild(tr);
       });
     }
 
-    // ------- Actions -------
-    btnReload.onclick = () => attachListeners();
+    btnRefreshStandings.onclick = refreshStandings;
+    selWeekSt.onchange = refreshStandings;
+    inSeasonSt.onchange = refreshStandings;
 
-    btnAddGame.onclick = async () => {
-      const { season, week } = path();
-      const hv = (home.value || '').trim();
-      const av = (away.value || '').trim();
-      if (!hv || !av || !kickoff.value) return alert('Home, Away, and Kickoff are required.');
-      await addDoc(colGames(season, week), {
-        home: hv,
-        away: av,
-        kickoff: new Date(kickoff.value),
-        createdAt: ts(),
-        updatedAt: ts(),
-        winner: null
-      });
-      home.value = '';
-      away.value = '';
-      kickoff.value = '';
-    };
-
-    // Deletes ALL games for the selected week and resets week standings
-    btnClearGames.onclick = async () => {
-      const { season, week } = path();
-      if (!confirm(`Delete ALL games in Season ${season}, Week ${week}? This cannot be undone.`)) return;
-
-      const batch = writeBatch(db);
-      const gSnap = await getDocs(colGames(season, week)); // <-- fixes ReferenceError getDocs
-      gSnap.forEach(docSnap => batch.delete(docSnap.ref));
-
-      const sSnap = await getDocs(colWeekStandings(season, week));
-      sSnap.forEach(docSnap => batch.delete(docSnap.ref));
-
-      await batch.commit();
-      alert('Games and week standings cleared.');
-    };
-
-    btnResetWeekStandings.onclick = async () => {
-      const { season, week } = path();
-      const sSnap = await getDocs(colWeekStandings(season, week));
-      const batch = writeBatch(db);
-      sSnap.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-      alert('Week standings reset.');
-    };
-
-    // Compute week + overall based on winners vs user picks
-    btnFinalizeWeek.onclick = async () => {
-      const { season, week } = path();
-
-      // Read games with winners set
-      const gamesSnap = await getDocs(colGames(season, week));
-      const games = [];
-      gamesSnap.forEach(d => games.push({ id: d.id, ...d.data() }));
-      if (!games.length) return alert('No games to finalize.');
-      const unresolved = games.filter(g => !g.winner);
-      if (unresolved.length) {
-        if (!confirm(`There are ${unresolved.length} games without a winner. Finalize anyway?`)) return;
-      }
-
-      // Read all picks for the week
-      const picksSnap = await getDocs(colPicks(season, week));
-      const picks = [];
-      picksSnap.forEach(d => picks.push({ id: d.id, ...d.data() }));
-      // Group picks by user
-      const byUser = new Map();
-      for (const p of picks) {
-        if (!byUser.has(p.userId)) byUser.set(p.userId, []);
-        byUser.get(p.userId).push(p);
-      }
-
-      // Load minimal user info (optional)
-      const usersSnap = await getDocs(colUsers());
-      const users = new Map();
-      usersSnap.forEach(u => users.set(u.id, u.data()));
-
-      // Compute week standings
-      const batch = writeBatch(db);
-      for (const [userId, userPicks] of byUser.entries()) {
-        let correct = 0, total = 0;
-        for (const p of userPicks) {
-          const g = games.find(x => x.id === p.gameId);
-          if (!g) continue;
-          if (g.winner) {
-            total++;
-            if (p.pick === g.winner) correct++;
-            if (g.winner === 'TIE' && p.pick === 'TIE') correct++; // optional tie handling
-          }
-        }
-        const userDoc = users.get(userId) || {};
-        const displayName = userDoc.displayName || userDoc.name || userId;
-        const weekRef = doc(db, 'seasons', season, 'weeks', week, 'standings', userId);
-        batch.set(weekRef, { userId, displayName, correct, total, updatedAt: ts() }, { merge: true });
-      }
-
-      // Compute overall: sum across all weeks (cheap version = read all week standings for season)
-      const allWeekRefsSnap = await getDocs(collection(db, 'seasons', season, 'weeks')); // subcollections aren't directly listable
-      // Because Firestore can't list subcollections easily from client, we’ll approximate:
-      // iterate known range 1..18 and read standings for each:
-      const totals = new Map(); // userId -> {correct,total,displayName}
-      for (let w = 1; w <= 18; w++) {
-        const wk = String(w).padStart(2, '0');
-        const wkSnap = await getDocs(colWeekStandings(season, wk));
-        wkSnap.forEach(d => {
-          const v = d.data();
-          if (!totals.has(v.userId)) totals.set(v.userId, { correct:0, total:0, displayName: v.displayName || v.userId });
-          const agg = totals.get(v.userId);
-          agg.correct += (v.correct || 0);
-          agg.total   += (v.total || 0);
-        });
-      }
-      for (const [userId, agg] of totals.entries()) {
-        const overallRef = doc(db, 'seasons', season, 'overall', userId);
-        batch.set(overallRef, { userId, displayName: agg.displayName, correct: agg.correct, total: agg.total, updatedAt: ts() }, { merge: true });
-      }
-
-      await batch.commit();
-      alert('Week finalized and standings updated.');
-    };
-
-    // Auto-attach on load and when week/season changes
-    selWeek.onchange = attachListeners;
-    inSeason.onchange = attachListeners;
-    attachListeners();
+    // boot
+    attachGameListeners();
+    refreshStandings();
   </script>
 </body>
 </html>
