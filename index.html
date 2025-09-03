@@ -24,7 +24,7 @@
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
   .toast.show{opacity:1}
 
-  /* Admin controls hidden by default */
+  /* Admin controls are hidden by default */
   .adminOnly{ display:none }
   /* When body has is-admin, show admin controls */
   .is-admin .adminOnly{ display:inline-block !important }
@@ -60,9 +60,9 @@
       <label>Week:</label>
       <select id="weekSelect"></select>
       <span id="lockBadge" class="lock muted">…</span>
-      <!-- Admin lock toggle -->
+      <!-- Admin finalize toggle -->
       <span class="pill adminOnly">
-        <input id="adminWeekLock" type="checkbox" /> Lock week
+        <input id="adminWeekLock" type="checkbox" /> Finalize
       </span>
     </div>
 
@@ -101,13 +101,14 @@
 <!-- Firebase (ESM) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import { 
-    getAuth, onAuthStateChanged, signInWithEmailAndPassword, 
-    createUserWithEmailAndPassword, signOut 
+  import {
+    getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+    createUserWithEmailAndPassword, signOut
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { 
-    initializeFirestore, getFirestore, doc, setDoc, onSnapshot, 
-    collection, addDoc, query, orderBy 
+  import {
+    initializeFirestore, getFirestore, doc, setDoc, onSnapshot,
+    collection, addDoc, query, orderBy,
+    getDocs, deleteDoc
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
   // ---------- FIREBASE CONFIG (yours) ----------
@@ -207,11 +208,11 @@
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
 
-    // Lock doc
+    // Finalize (lock) doc
     const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
     unsubLock = onSnapshot(lockRef, s => {
       state.lock = s.exists() ? !!s.data().locked : false;
-      el("#lockBadge").textContent = state.lock ? "Locked" : "Open";
+      el("#lockBadge").textContent = state.lock ? "Finalized" : "Open";
       el("#lockBadge").className = "lock " + (state.lock ? "danger" : "muted");
       el("#adminWeekLock").checked = state.lock;
       renderGames();
@@ -344,20 +345,19 @@
   };
 
   // Delete all games for the current week
-window.clearGames = async function(){
-  if (!state.isAdmin){ console.warn("Admin only"); return; }
-  const col = collection(db, "weeks", state.weekId, "games");
-
-  // Grab all games in the current week
-  const snap = await getDocs(col);
-  let count = 0;
-  for (const d of snap.docs){
-    await deleteDoc(d.ref);
-    count++;
-  }
-  console.log("Cleared", count, "games for", state.weekId);
-  toast("Cleared " + count + " games");
-};
+  window.clearGames = async function(){
+    if (!state.isAdmin){ console.warn("Admin only"); return; }
+    const col = collection(db, "weeks", state.weekId, "games");
+    const snap = await getDocs(col);
+    let count = 0;
+    for (const d of snap.docs){
+      await deleteDoc(d.ref);
+      count++;
+    }
+    console.log("Cleared", count, "games for", state.weekId);
+    toast("Cleared " + count + " games");
+    renderGames();
+  };
 
   window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
 </script>
