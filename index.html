@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family NFL Picks</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--accent:#6ea8ff;--bad:#ff6b6b;--border:#252a33}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:960px;margin:0 auto;padding:12px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
+  button,input,select{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:10px;border-radius:10px}
+  button.primary{outline:2px solid var(--accent)}
+  .grid{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+  .match{padding:10px;border:1px dashed var(--border);border-radius:10px}
+  .team{padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;text-align:center}
+  .team.winner{outline:2px solid var(--accent)}
+  .bar{display:flex;justify-content:space-between;align-items:center}
+  .muted{color:var(--muted)}
+  .danger{color:var(--bad)}
+  .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s}
+  .toast.show{opacity:1}
+  .adminOnly{display:none}
+  .lock{padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
+  .disabled{opacity:.6;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <h1 style="margin:0">Family NFL Picks</h1>
+    <div id="userBox" class="row"></div>
+  </div>
+
+  <!-- Auth -->
+  <div id="auth" class="card">
+    <div class="row">
+      <input id="email" type="email" placeholder="Email">
+      <input id="pass" type="password" placeholder="Password">
+      <button id="signInBtn" class="primary">Sign in</button>
+      <button id="registerBtn">Register</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Only invited family should register.</div>
+  </div>
+
+  <!-- Main -->
+  <div id="app" class="card" style="display:none">
+    <div class="row">
+      <label>Week:</label>
+      <select id="weekSelect"></select>
+      <span id="lockBadge" class="lock muted">…</span>
+      <span class="pill adminOnly">
+        <input id="adminWeekLock" type="checkbox"> Lock week
+      </span>
+    </div>
+
+    <div id="games" class="card" style="margin-top:8px">
+      <div class="muted" id="noGames" style="display:none">No games yet for this week.</div>
+      <div id="gameList"></div>
+    </div>
+
+    <div class="card">
+      <div class="bar">
+        <div class="muted">Your picks autosave</div>
+        <button id="addGameBtn" class="adminOnly">+ Add game</button>
+      </div>
+      <div class="adminOnly" id="adminAddPanel" style="display:none;margin-top:8px">
+        <div class="row">
+          <input id="homeTeam" placeholder="Home team (e.g., Cowboys)">
+          <input id="awayTeam" placeholder="Away team (e.g., Eagles)">
+          <button id="saveGameBtn" class="primary">Save game</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Saved!</div>
+</div>
+
+<!-- Firebase CDN -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+  // ---------- CONFIG ----------
+  const firebaseConfig = {
+    apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
+    authDomain: "nflpicks2025-51202.firebaseapp.com",
+    projectId: "nflpicks2025-51202",
+    storageBucket: "nflpicks2025-51202.firebasestorage.app",
+    messagingSenderId: "125791202188",
+    appId: "1:125791202188:web:903f4c74dc84a5b69604a9",
+    measurementId: "G-289KXJQZGG"
+  };
+
+  const allowedEmails = [
+    // Optional: add your family’s emails here to restrict registration
+    // "ashley@example.com","brent@example.com"
+  ];
+  let ADMIN_UIDS = []; // After first login, fill with your UID
+
+  // ---------- INIT ----------
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const el = s => document.querySelector(s);
+  const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
+
+  const state = { user: null, isAdmin: false, weekId: "2025-Week-01", lock: false, picks: {}, games: [] };
+
+  // ---------- AUTH ----------
+  el("#signInBtn").addEventListener("click", async () => {
+    const email = el("#email").value.trim(), pass = el("#pass").value;
+    await signInWithEmailAndPassword(auth, email, pass).catch(e=>alert(e.message));
+  });
+  el("#registerBtn").addEventListener("click", async () => {
+    const email = el("#email").value.trim(), pass = el("#pass").value;
+    if (allowedEmails.length && !allowedEmails.includes(email)) return alert("Ask Ashley to add your email.");
+    await createUserWithEmailAndPassword(auth, email, pass).catch(e=>alert(e.message));
+  });
+
+  onAuthStateChanged(auth, async (user) => {
+    state.user = user || null;
+    if (!user){ el("#auth").style.display="block"; el("#app").style.display="none"; el("#userBox").innerHTML=""; return; }
+    el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
+    el("#signOutBtn").addEventListener("click", () => signOut(auth));
+    state.isAdmin = ADMIN_UIDS.includes(user.uid);
+    document.querySelectorAll(".adminOnly").forEach(n => n.style.display = state.isAdmin ? "" : "none");
+    el("#auth").style.display="none"; el("#app").style.display="block";
+    await setupWeeks(); await subscribeWeek();
+  });
+
+  // ---------- WEEKS ----------
+  async function setupWeeks(){
+    const sel = el("#weekSelect"); sel.innerHTML="";
+    for (let i=1;i<=18;i++){ const id=`2025-Week-${String(i).padStart(2,"0")}`; const o=document.createElement("option"); o.value=id; o.textContent=`Week ${i}`; sel.appendChild(o); }
+    sel.value = state.weekId;
+    sel.addEventListener("change", () => { state.weekId = sel.value; subscribeWeek(true); });
+  }
+
+  let unsubGames=null, unsubLock=null, unsubMyPicks=null;
+
+  async function subscribeWeek(){
+    unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
+
+    const lockRef = doc(db,"weeks",state.weekId,"meta","lock");
+    unsubLock = onSnapshot(lockRef, s => {
+      state.lock = s.exists() ? !!s.data().locked : false;
+      el("#lockBadge").textContent = state.lock ? "Locked" : "Open";
+      el("#lockBadge").className = "lock " + (state.lock ? "danger" : "muted");
+      el("#adminWeekLock").checked = state.lock;
+      renderGames();
+    });
+    el("#adminWeekLock").onchange = async e => {
+      if (!state.isAdmin) return;
+      await setDoc(lockRef, { locked: e.target.checked }, { merge:true });
+    };
+
+    const gamesCol = collection(db,"weeks",state.weekId,"games");
+    unsubGames = onSnapshot(query(gamesCol, orderBy("createdAt","asc")), snap => {
+      state.games = []; snap.forEach(d=>state.games.push({ id:d.id, ...d.data() }));
+      el("#noGames").style.display = state.games.length ? "none":"";
+      renderGames();
+    });
+
+    const myPicksRef = doc(db,"picks",state.user.uid,"weeks",state.weekId);
+    unsubMyPicks = onSnapshot(myPicksRef, snap => {
+      state.picks = snap.exists() ? (snap.data().picks || {}) : {};
+      renderGames();
+    });
+  }
+
+  function renderGames(){
+    const list = el("#gameList"); list.innerHTML="";
+    state.games.forEach(g => {
+      const row = document.createElement("div"); row.className="match grid";
+      const home = document.createElement("button"); home.className="team"; home.textContent=g.home;
+      const vs = Object.assign(document.createElement("div"), {innerHTML:'<span class="muted">vs</span>', style:"text-align:center"});
+      const away = document.createElement("button"); away.className="team"; away.textContent=g.away;
+
+      if (state.picks[g.id]==="home") home.classList.add("winner");
+      if (state.picks[g.id]==="away") away.classList.add("winner");
+
+      if (state.lock && !state.isAdmin){ home.classList.add("disabled"); away.classList.add("disabled"); }
+
+      home.onclick = () => choose(g.id,"home");
+      away.onclick = () => choose(g.id,"away");
+
+      row.appendChild(home); row.appendChild(vs); row.appendChild(away);
+      list.appendChild(row);
+    });
+
+    el("#addGameBtn").onclick = () => { const p=el("#adminAddPanel"); p.style.display = p.style.display ? "" : "none"; };
+    el("#saveGameBtn").onclick = saveGame;
+  }
+
+  async function choose(gameId, side){
+    if (state.lock && !state.isAdmin) return;
+    state.picks[gameId] = side;
+    const ref = doc(db,"picks",state.user.uid,"weeks",state.weekId);
+    await setDoc(ref,{ picks: state.picks, updatedAt: Date.now() },{ merge:true });
+    toast();
+    renderGames();
+  }
+
+  async function saveGame(){
+    if (!state.isAdmin) return;
+    const home = el("#homeTeam").value.trim(), away = el("#awayTeam").value.trim();
+    if (!home || !away) return alert("Enter both team names.");
+    await addDoc(collection(db,"weeks",state.weekId,"games"), { home, away, createdAt: Date.now() });
+    el("#homeTeam").value=""; el("#awayTeam").value=""; toast("Game added");
+  }
+
+  // Utilities for console
+  window.seedWeek1 = async function(pairs){
+    if (!state.isAdmin){ console.warn("Admin only"); return; }
+    const col = collection(db,"weeks",state.weekId,"games");
+    for (const p of pairs){ const [home,away]=p.split(" vs ").map(s=>s.trim()); if (home&&away){ await addDoc(col,{home,away,createdAt:Date.now()}); } }
+    console.log("Seeded", pairs.length, "games");
+  };
+  window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
+</script>
+</body>
+</html>
