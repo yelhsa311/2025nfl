@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NFL Picks • User</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:#0e1120;position:sticky;top:0;z-index:3}
+    h1{margin:0;font-size:18px;letter-spacing:.4px}
+    .muted{color:#aeb6ff9c}
+    .badge{font-size:12px;padding:3px 7px;border:1px solid var(--border);border-radius:8px;background:#0e1330}
+    main{padding:16px;display:grid;gap:16px;grid-template-columns:360px 1fr}
+    @media (max-width:1000px){main{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .card h2{margin:0 0 8px;font-size:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .stack{display:grid;gap:10px}
+    .grid{display:grid;gap:8px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    input,select,button{background:#0e1226;color:#e9ecff;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+    button{cursor:pointer}
+    button.primary{background:#4c73ff;border-color:#2b4bd8}
+    button.ghost{background:transparent}
+    .hint{font-size:12px;color:#aeb6ff9c}
+    .sep{height:1px;background:var(--border);margin:8px 0}
+    table{width:100%;border-collapse:collapse;background:#0e1226;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    th{background:#0b0f1f;color:#b7c0ff}
+    tbody tr:hover{background:#0f1430}
+    .pill{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1130;color:#c7d0ff}
+    .winner{font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:#101542;color:#c7d0ff;margin-left:8px}
+    .pickRow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+    .pickBtn{border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:#0e1226;cursor:pointer;user-select:none}
+    .pickBtn[aria-pressed="true"]{outline:2px solid var(--accent);background:#182055}
+    .pickBtn.locked{opacity:.55;cursor:not-allowed}
+    .status-ok{color:var(--ok)}
+    .status-bad{color:var(--danger)}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
+    <div id="authArea" class="row">
+      <span id="who" class="badge">signed out</span>
+      <button id="btnSignOut" class="ghost" style="display:none">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card stack">
+      <h2>Your Account</h2>
+      <div id="authForm" class="stack">
+        <input id="inEmail" type="email" placeholder="email@example.com" />
+        <input id="inPass" type="password" placeholder="password" />
+        <div class="row">
+          <button id="btnSignIn" class="primary">Sign in</button>
+          <button id="btnCreate" class="ghost">Create account</button>
+        </div>
+        <div id="authMsg" class="hint"></div>
+      </div>
+
+      <div class="sep"></div>
+
+      <h2>Week</h2>
+      <div class="grid cols-2">
+        <select id="selWeek"></select>
+        <input id="inSeason" placeholder="Season (e.g. 2025)" />
+      </div>
+      <div class="row">
+        <button id="btnReload" class="ghost">Reload</button>
+        <span class="hint">Tap a team under each matchup to make your pick. Picks lock at kickoff.</span>
+      </div>
+    </section>
+
+    <section class="card stack">
+      <div class="row" style="align-items:center;justify-content:space-between">
+        <h2 style="margin:0">Make Your Picks</h2>
+        <div id="weekSummary" class="hint"></div>
+      </div>
+      <table id="tblGames">
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th>Matchup & Your Pick</th>
+            <th style="width:210px">Kickoff</th>
+            <th style="width:160px">Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <!-- Firebase (ESM) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+      createUserWithEmailAndPassword, signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, setDoc, getDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    // ---- Firebase config (your project) ----
+    const firebaseConfig = {
+      apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
+      authDomain: "nflpicks2025-51202.firebaseapp.com",
+      projectId: "nflpicks2025-51202",
+      storageBucket: "nflpicks2025-51202.appspot.com",
+      messagingSenderId: "125791202188",
+      appId: "1:125791202188:web:903f4c74dc84a5b69604a9",
+      measurementId: "G-289KXJQZGG"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // ---- DOM ----
+    const who = document.getElementById('who');
+    const btnSignOut = document.getElementById('btnSignOut');
+    const authForm = document.getElementById('authForm');
+    const inEmail = document.getElementById('inEmail');
+    const inPass  = document.getElementById('inPass');
+    const btnSignIn = document.getElementById('btnSignIn');
+    const btnCreate = document.getElementById('btnCreate');
+    const authMsg = document.getElementById('authMsg');
+
+    const selWeek = document.getElementById('selWeek');
+    const inSeason = document.getElementById('inSeason');
+    const btnReload = document.getElementById('btnReload');
+    const tblGamesBody = document.querySelector('#tblGames tbody');
+    const weekSummary = document.getElementById('weekSummary');
+
+    // ---- Helpers ----
+    const ts = () => serverTimestamp();
+    function clearTable(tbody){ while (tbody.firstChild) tbody.removeChild(tbody.firstChild); }
+    function fmtPct(c,t){ return t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—'; }
+
+    // Collections
+    const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
+    const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks');
+
+    // week options
+    for (let w=1; w<=18; w++){
+      const v=String(w).padStart(2,'0');
+      const opt=document.createElement('option'); opt.value=v; opt.textContent='Week '+w; selWeek.appendChild(opt);
+    }
+    inSeason.value = new Date().getFullYear();
+    selWeek.value = '01';
+
+    let unsubGames = null;
+    let currentUser = null;
+    let myPicks = new Map(); // gameId -> pick
+
+    onAuthStateChanged(auth, async (u)=>{
+      currentUser = u || null;
+      if (u){
+        who.textContent = u.email || u.uid;
+        authForm.style.display='none';
+        btnSignOut.style.display='inline-block';
+        // ensure /users doc exists (optional)
+        await setDoc(doc(db,'users',u.uid), { displayName: (u.email||'').split('@')[0], updatedAt: ts() }, { merge:true });
+        attachGameListener();
+      } else {
+        who.textContent = 'signed out';
+        authForm.style.display='grid';
+        btnSignOut.style.display='none';
+        detachGameListener();
+        clearTable(tblGamesBody);
+      }
+    });
+
+    btnSignIn.onclick = async ()=>{
+      try{ await signInWithEmailAndPassword(auth, inEmail.value, inPass.value); authMsg.textContent='Signed in.'; }
+      catch(e){ authMsg.textContent=e.message; }
+    };
+    btnCreate.onclick = async ()=>{
+      try{
+        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
+        await setDoc(doc(db,'users',cred.user.uid), { displayName: inEmail.value.split('@')[0], createdAt: ts() }, { merge:true });
+        authMsg.textContent='Account created.';
+      } catch(e){ authMsg.textContent=e.message; }
+    };
+    btnSignOut.onclick = ()=> signOut(auth);
+
+    btnReload.onclick = ()=> attachGameListener();
+    selWeek.onchange = ()=> attachGameListener();
+    inSeason.onchange = ()=> attachGameListener();
+
+    function detachGameListener(){ if (unsubGames) {unsubGames(); unsubGames=null;} }
+
+    async function attachGameListener(){
+      if (!currentUser) return;
+      const season=(inSeason.value||'').trim();
+      const week=(selWeek.value||'').trim();
+      if (!season || !week) return;
+
+      detachGameListener();
+
+      // Load user's existing picks for this week
+      myPicks = new Map();
+      (await getDocs(colPicks(season, week))).forEach(d=>{
+        const v=d.data();
+        if (v.userId === currentUser.uid) myPicks.set(v.gameId, v.pick);
+      });
+
+      unsubGames = onSnapshot(query(colGames(season, week), orderBy('kickoff','asc')), (snap)=>{
+        const games = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+        renderGames(games);
+      });
+    }
+
+    async function savePick(gameId, label){
+      const season = String(inSeason.value);
+      const week   = String(selWeek.value);
+      await setDoc(doc(db,'seasons',season,'weeks',week,'picks', `${currentUser.uid}_${gameId}`), {
+        userId: currentUser.uid,
+        gameId,
+        pick: label,
+        updatedAt: ts(),
+        createdAt: ts()
+      }, { merge:true });
+      myPicks.set(gameId, label); // optimistic update
+    }
+
+    function renderGames(games){
+      clearTable(tblGamesBody);
+      let correct=0, total=0;
+      const now = Date.now();
+
+      games.forEach((g, i)=>{
+        const tr=document.createElement('tr');
+
+        // #
+        const tdIdx=document.createElement('td'); tdIdx.textContent=String(i+1); tr.appendChild(tdIdx);
+
+        // Matchup + clickable pick buttons
+        const tdMatch=document.createElement('td');
+        const top = document.createElement('div');
+        top.innerHTML = `<span class="pill">${g.away}</span> @ <span class="pill">${g.home}</span>` + (g.winner ? `<span class="winner">Winner: ${g.winner}</span>` : '');
+        tdMatch.appendChild(top);
+
+        const koDate = g.kickoff?.toDate ? g.kickoff.toDate() : new Date(g.kickoff);
+        const locked = koDate.getTime() <= now;
+
+        const picksRow = document.createElement('div');
+        picksRow.className = 'pickRow';
+
+        const choices = [g.away, g.home]; // add 'TIE' if you want: choices.push('TIE')
+        const chosen = myPicks.get(g.id) || '';
+
+        choices.forEach(label=>{
+          const btn = document.createElement('button');
+          btn.className = 'pickBtn';
+          btn.type = 'button';
+          btn.textContent = label;
+          btn.setAttribute('aria-pressed', String(chosen === label));
+          if (locked) btn.classList.add('locked');
+
+          btn.onclick = async ()=>{
+            if (locked) return;
+            await savePick(g.id, label);
+            // update pressed state locally
+            [...picksRow.querySelectorAll('.pickBtn')].forEach(b=>b.setAttribute('aria-pressed','false'));
+            btn.setAttribute('aria-pressed','true');
+          };
+
+          picksRow.appendChild(btn);
+        });
+
+        tdMatch.appendChild(picksRow);
+        tr.appendChild(tdMatch);
+
+        // Kickoff
+        const tdKick=document.createElement('td');
+        tdKick.textContent = koDate.toLocaleString();
+        tr.appendChild(tdKick);
+
+        // Status
+        const tdStatus=document.createElement('td');
+        if (g.winner) {
+          total++;
+          const mine = myPicks.get(g.id);
+          if (mine){
+            if (mine === g.winner || (mine==='TIE' && g.winner==='TIE')) {
+              tdStatus.textContent = '✓ Correct';
+              tdStatus.className = 'status-ok';
+              correct++;
+            } else {
+              tdStatus.textContent = '✗ Incorrect';
+              tdStatus.className = 'status-bad';
+            }
+          } else {
+            tdStatus.textContent = '— (no pick)';
+          }
+        } else {
+          tdStatus.textContent = locked ? 'Locked (awaiting winner)' : 'Open';
+        }
+        tr.appendChild(tdStatus);
+
+        tblGamesBody.appendChild(tr);
+      });
+
+      weekSummary.textContent = total ? `This week: ${correct}/${total} (${fmtPct(correct,total)})` : '';
+    }
+  </script>
+</body>
+</html>
