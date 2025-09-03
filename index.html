@@ -1,365 +1,493 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks</title>
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<style>
-  :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--accent:#6ea8ff;--bad:#ff6b6b;--border:#252a33}
-  body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
-  .wrap{max-width:960px;margin:0 auto;padding:12px}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
-  button,input,select{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:10px;border-radius:10px}
-  button.primary{outline:2px solid var(--accent)}
-  .grid{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
-  .match{padding:10px;border:1px dashed var(--border);border-radius:10px}
-  .team{padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;text-align:center}
-  .team.winner{outline:2px solid var(--accent)}
-  .bar{display:flex;justify-content:space-between;align-items:center}
-  .muted{color:var(--muted)}
-  .danger{color:var(--bad)}
-  .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
-  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
-  .toast.show{opacity:1}
-
-  /* Admin controls are hidden by default */
-  .adminOnly{ display:none }
-  /* When body has is-admin, show admin controls */
-  .is-admin .adminOnly{ display:inline-block !important }
-  /* Keep the add panel collapsed until +Add clicked */
-  #adminAddPanel.adminOnly{ display:none !important }
-
-  .lock{padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
-  .disabled{opacity:.6;pointer-events:none}
-  h2.day{margin:16px 0 8px}
-</style>
+  <meta charset="utf-8" />
+  <title>NFL Picks • Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d;
+      --border:#2a2f47;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:#0e1120;position:sticky;top:0;z-index:2}
+    h1{margin:0;font-size:18px;letter-spacing:.4px}
+    .muted{color:#aeb6ff9c}
+    main{display:grid;gap:16px;padding:16px;grid-template-columns: 360px 1fr}
+    @media (max-width:1000px){main{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .card h2{margin:0 0 8px;font-size:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    input,select,button{background:#0e1226;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+    input,select{flex:1}
+    button{cursor:pointer}
+    button.primary{background:var(--accent);border-color:#2b4bd8}
+    button.ghost{background:transparent}
+    button.danger{background:var(--danger);border-color:#d14a4a;color:#fff}
+    button.ok{background:var(--ok);border-color:#1a9b6f;color:#00140d}
+    .stack{display:grid;gap:8px}
+    .grid{display:grid;gap:8px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    .grid.cols-3{grid-template-columns:1fr 1fr 1fr}
+    table{width:100%;border-collapse:collapse;background:#0e1226;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
+    th{background:#0b0f1f;color:#b7c0ff}
+    tbody tr:hover{background:#0f1430}
+    .right{margin-left:auto}
+    .pill{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1130;color:#c7d0ff}
+    .hint{font-size:12px;color:#aeb6ff9c}
+    .sep{height:1px;background:var(--border);margin:8px 0}
+    .danger-text{color:var(--danger)}
+    .ok-text{color:var(--ok)}
+    .badge{font-size:12px;padding:3px 7px;border:1px solid var(--border);border-radius:8px;background:#0e1330}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="bar">
-    <h1 style="margin:0">Family NFL Picks</h1>
-    <div id="userBox" class="row"></div>
-  </div>
-
-  <!-- Auth -->
-  <div id="auth" class="card">
-    <div class="row">
-      <input id="email" type="email" placeholder="Email" />
-      <input id="pass" type="password" placeholder="Password" />
-      <button id="signInBtn" class="primary">Sign in</button>
-      <button id="registerBtn">Register</button>
+  <header>
+    <h1>🏈 NFL Picks Admin <span class="muted">· Firestore</span></h1>
+    <div id="authArea" class="flex">
+      <span id="who" class="badge">signed out</span>
+      <button id="btnSignOut" class="ghost" style="display:none">Sign out</button>
     </div>
-    <div class="muted" style="margin-top:6px">Only invited family should register.</div>
-  </div>
+  </header>
 
-  <!-- Main App -->
-  <div id="app" class="card" style="display:none">
-    <div class="row">
-      <label>Week:</label>
-      <select id="weekSelect"></select>
-      <span id="lockBadge" class="lock muted">…</span>
-      <!-- Admin finalize toggle -->
-      <span class="pill adminOnly">
-        <input id="adminWeekLock" type="checkbox" /> Finalize
-      </span>
-    </div>
-
-    <div id="games" class="card" style="margin-top:8px">
-      <div class="muted" id="noGames" style="display:none">No games yet for this week.</div>
-      <div id="gameList"></div>
-    </div>
-
-    <div class="card">
-      <div class="bar">
-        <div class="muted">Your picks autosave</div>
-        <!-- Admin add game button -->
-        <button id="addGameBtn" class="adminOnly">+ Add game</button>
-      </div>
-      <!-- Admin add panel -->
-      <div class="adminOnly" id="adminAddPanel" style="display:none;margin-top:8px">
+  <main>
+    <!-- LEFT: Controls -->
+    <section class="card stack">
+      <h2>Setup</h2>
+      <div class="stack">
+        <div class="grid cols-2">
+          <select id="selWeek" title="Week"></select>
+          <input id="inSeason" placeholder="Season (e.g. 2025)" />
+        </div>
         <div class="row">
-          <select id="gameDay" title="Day">
-            <option value="Thursday">Thursday</option>
-            <option value="Friday">Friday</option>
-            <option value="Saturday">Saturday</option>
-            <option value="Sunday" selected>Sunday</option>
-            <option value="Monday">Monday</option>
-          </select>
-          <input id="homeTeam" placeholder="Home team (e.g., Cowboys)" />
-          <input id="awayTeam" placeholder="Away team (e.g., Eagles)" />
-          <button id="saveGameBtn" class="primary">Save game</button>
+          <button id="btnReload" class="ghost">Reload</button>
+          <span class="hint">Choose week + season first.</span>
         </div>
       </div>
-    </div>
-  </div>
 
-  <div class="toast" id="toast">Saved!</div>
-</div>
+      <div class="sep"></div>
 
-<!-- Firebase (ESM) -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import {
-    getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-    createUserWithEmailAndPassword, signOut
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import {
-    initializeFirestore, getFirestore, doc, setDoc, onSnapshot,
-    collection, addDoc, query, orderBy,
-    getDocs, deleteDoc
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+      <h2>Auth</h2>
+      <div id="authForm" class="stack">
+        <input id="inEmail" type="email" placeholder="email@example.com" />
+        <input id="inPass" type="password" placeholder="password" />
+        <div class="row">
+          <button id="btnSignIn" class="primary">Sign in</button>
+          <button id="btnCreate" class="ghost">Create user</button>
+        </div>
+        <div id="authMsg" class="hint"></div>
+      </div>
 
-  // ---------- FIREBASE CONFIG (yours) ----------
-  const firebaseConfig = {
-    apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
-    authDomain: "nflpicks2025-51202.firebaseapp.com",
-    projectId: "nflpicks2025-51202",
-    storageBucket: "nflpicks2025-51202.firebasestorage.app",
-    messagingSenderId: "125791202188",
-    appId: "1:125791202188:web:903f4c74dc84a5b69604a9",
-    measurementId: "G-289KXJQZGG"
-  };
+      <div class="sep"></div>
 
-  // ---------- INIT ----------
-  const app = initializeApp(firebaseConfig);
-  // Fix Safari/CORS by using long-polling transport
-  initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
-  const auth = getAuth(app);
-  const db = getFirestore(app);
+      <h2>Add Game</h2>
+      <div class="stack">
+        <div class="grid cols-2">
+          <input id="home" placeholder="Home team" />
+          <input id="away" placeholder="Away team" />
+        </div>
+        <input id="kickoff" type="datetime-local" />
+        <button id="btnAddGame" class="primary">Add game</button>
+        <div class="hint">Games are stored under <code>seasons/{season}/weeks/{week}/games</code>.</div>
+      </div>
 
-  // Expose for console/debug + set admin UID list
-  window.auth = auth;
-  window.db = db;
-  window.ADMIN_UIDS = ["PLypRJvVidTYlNhJ6eRT0n9iZVG2"]; // <-- your admin UID
+      <div class="sep"></div>
 
-  const el = s => document.querySelector(s);
-  const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
+      <h2>Danger Zone</h2>
+      <div class="row">
+        <button id="btnClearGames" class="danger">Clear Games (week)</button>
+        <button id="btnResetWeekStandings" class="ghost danger-text">Reset Week Standings</button>
+      </div>
+      <div class="hint">Clears all games for the selected week (and any computed week standings).</div>
+    </section>
 
-  const allowedEmails = [
-    // Optional: add a whitelist like "you@example.com"
-  ];
+    <!-- RIGHT: Data -->
+    <section class="stack">
+      <div class="card stack">
+        <div class="flex">
+          <h2 style="margin-right:auto">Games</h2>
+          <button id="btnFinalizeWeek" class="ok">Finalize Week</button>
+        </div>
+        <div class="hint">Set the winner for each game, then click <b>Finalize Week</b> to compute standings.</div>
+        <table id="tblGames">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Matchup</th>
+              <th>Kickoff (local)</th>
+              <th>Winner</th>
+              <th>Saved</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
 
-  const state = { user: null, isAdmin: false, weekId: "2025-Week-01", lock: false, picks: {}, games: [] };
+      <div class="card stack">
+        <h2>Per-Week Standings</h2>
+        <table id="tblWeek">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Correct</th>
+              <th>Total</th>
+              <th>%</th>
+              <th>Last Updated</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
 
-  // ---------- AUTH BUTTON HANDLERS ----------
-  el("#signInBtn").addEventListener("click", async () => {
-    const email = el("#email").value.trim();
-    const pass  = el("#pass").value;
-    try { await signInWithEmailAndPassword(auth, email, pass); }
-    catch (e) { alert(e.message); }
-  });
+      <div class="card stack">
+        <h2>Overall Standings (Season)</h2>
+        <table id="tblOverall">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Correct</th>
+              <th>Total</th>
+              <th>%</th>
+              <th>Last Updated</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
 
-  el("#registerBtn").addEventListener("click", async () => {
-    const email = el("#email").value.trim();
-    const pass  = el("#pass").value;
-    if (Array.isArray(allowedEmails) && allowedEmails.length && !allowedEmails.includes(email)) {
-      alert("Ask Ashley to add your email.");
-      return;
-    }
-    try { await createUserWithEmailAndPassword(auth, email, pass); }
-    catch (e) { alert(e.message); }
-  });
+  <!-- Firebase (ESM) -->
+  <script type="module">
+    // ------- Firebase Imports (modular) -------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+      createUserWithEmailAndPassword, signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, setDoc, getDoc, getDocs, addDoc, updateDoc,
+      deleteDoc, onSnapshot, query, where, orderBy, writeBatch, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // ---------- AUTH STATE ----------
-  onAuthStateChanged(auth, async (user) => {
-    state.user = user || null;
-
-    if (!user){
-      el("#auth").style.display = "block";
-      el("#app").style.display  = "none";
-      el("#userBox").innerHTML  = "";
-      document.body.classList.remove("is-admin");
-      return;
-    }
-
-    // Header user info + sign out
-    el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
-    el("#signOutBtn").addEventListener("click", () => signOut(auth));
-
-    // Admin check + toggle admin CSS
-    state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
-    document.body.classList.toggle("is-admin", state.isAdmin);
-
-    // Show app + load
-    el("#auth").style.display = "none";
-    el("#app").style.display  = "block";
-
-    await setupWeeks();
-    await subscribeWeek();
-  });
-
-  // ---------- WEEKS ----------
-  async function setupWeeks(){
-    const sel = el("#weekSelect"); sel.innerHTML = "";
-    for (let i=1;i<=18;i++){
-      const id = `2025-Week-${String(i).padStart(2,"0")}`;
-      const o = document.createElement("option");
-      o.value = id; o.textContent = `Week ${i}`;
-      sel.appendChild(o);
-    }
-    sel.value = state.weekId;
-    sel.addEventListener("change", () => { state.weekId = sel.value; subscribeWeek(); });
-  }
-
-  let unsubGames=null, unsubLock=null, unsubMyPicks=null;
-
-  async function subscribeWeek(){
-    unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
-
-    // Finalize (lock) doc
-    const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
-    unsubLock = onSnapshot(lockRef, s => {
-      state.lock = s.exists() ? !!s.data().locked : false;
-      el("#lockBadge").textContent = state.lock ? "Finalized" : "Open";
-      el("#lockBadge").className = "lock " + (state.lock ? "danger" : "muted");
-      el("#adminWeekLock").checked = state.lock;
-      renderGames();
-    });
-    el("#adminWeekLock").onchange = async e => {
-      if (!state.isAdmin) return;
-      await setDoc(lockRef, { locked: e.target.checked }, { merge:true });
+    // ------- TODO: your Firebase project config -------
+    const firebaseConfig = {
+      apiKey: "YOUR_KEY",
+      authDomain: "YOUR_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      appId: "YOUR_APP_ID",
     };
 
-    // Games
-    const gamesCol = collection(db, "weeks", state.weekId, "games");
-    unsubGames = onSnapshot(query(gamesCol, orderBy("createdAt","asc")), snap => {
-      state.games = []; snap.forEach(d => state.games.push({ id: d.id, ...d.data() }));
-      el("#noGames").style.display = state.games.length ? "none" : "";
-      renderGames();
-    });
+    // ------- Init -------
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
 
-    // Your picks
-    const picksRef = doc(db, "picks", state.user.uid, "weeks", state.weekId);
-    unsubMyPicks = onSnapshot(picksRef, snap => {
-      state.picks = snap.exists() ? (snap.data().picks || {}) : {};
-      renderGames();
-    });
-  }
+    // ------- DOM -------
+    const selWeek = document.getElementById('selWeek');
+    const inSeason = document.getElementById('inSeason');
 
-  // ---------- RENDER ----------
-  function renderGames(){
-    const list = el("#gameList");
-    list.innerHTML = "";
+    const inEmail = document.getElementById('inEmail');
+    const inPass  = document.getElementById('inPass');
+    const btnSignIn = document.getElementById('btnSignIn');
+    const btnCreate = document.getElementById('btnCreate');
+    const btnSignOut = document.getElementById('btnSignOut');
+    const authMsg = document.getElementById('authMsg');
+    const who = document.getElementById('who');
 
-    // Group games by day in a fixed order
-    const order = ["Thursday", "Friday", "Saturday", "Sunday", "Monday"];
-    const groups = { Thursday: [], Friday: [], Saturday: [], Sunday: [], Monday: [], Unknown: [] };
+    const btnReload = document.getElementById('btnReload');
+    const btnAddGame = document.getElementById('btnAddGame');
+    const btnClearGames = document.getElementById('btnClearGames');
+    const btnResetWeekStandings = document.getElementById('btnResetWeekStandings');
+    const btnFinalizeWeek = document.getElementById('btnFinalizeWeek');
 
-    (state.games || []).forEach(g => {
-      const day = (g.day || "Unknown");
-      (groups[day] ? groups[day] : groups.Unknown).push(g);
-    });
+    const home = document.getElementById('home');
+    const away = document.getElementById('away');
+    const kickoff = document.getElementById('kickoff');
 
-    // Helper to render one matchup row
-    const renderRow = (g) => {
-      const row  = document.createElement("div"); row.className="match grid";
-      const home = document.createElement("button"); home.className="team"; home.textContent=g.home;
-      const vs   = Object.assign(document.createElement("div"), {innerHTML:'<span class="muted">vs</span>', style:"text-align:center"});
-      const away = document.createElement("button"); away.className="team"; away.textContent=g.away;
+    const tblGamesBody = document.querySelector('#tblGames tbody');
+    const tblWeekBody = document.querySelector('#tblWeek tbody');
+    const tblOverallBody = document.querySelector('#tblOverall tbody');
 
-      if (state.picks[g.id]==="home") home.classList.add("winner");
-      if (state.picks[g.id]==="away") away.classList.add("winner");
-      if (state.lock && !state.isAdmin){ home.classList.add("disabled"); away.classList.add("disabled"); }
+    // ------- State -------
+    let unsubGames = null;
+    let unsubWeekStandings = null;
+    let unsubOverall = null;
 
-      home.onclick = () => choose(g.id,"home");
-      away.onclick = () => choose(g.id,"away");
-
-      row.appendChild(home); row.appendChild(vs); row.appendChild(away);
-      list.appendChild(row);
-    };
-
-    let renderedAny = false;
-
-    // Render known day groups in order
-    order.forEach(day => {
-      const games = groups[day];
-      if (!games.length) return;
-      const h = document.createElement("h2");
-      h.className = "day";
-      h.textContent = day;
-      list.appendChild(h);
-      games.forEach(renderRow);
-      renderedAny = true;
-    });
-
-    // Render any unknowns at the end
-    if (groups.Unknown.length){
-      const h = document.createElement("h2");
-      h.className = "day";
-      h.textContent = "Other";
-      list.appendChild(h);
-      groups.Unknown.forEach(renderRow);
-      renderedAny = true;
+    // Populate weeks 1..18
+    for (let w = 1; w <= 18; w++) {
+      const opt = document.createElement('option');
+      opt.value = String(w).padStart(2, '0');
+      opt.textContent = `Week ${w}`;
+      selWeek.appendChild(opt);
     }
 
-    // Admin add UI
-    el("#addGameBtn").onclick = () => {
-      const p = el("#adminAddPanel");
-      p.style.display = (p.style.display === "none" || !p.style.display) ? "" : "none";
+    // Sensible defaults
+    inSeason.value = new Date().getFullYear();
+    selWeek.value = "01";
+
+    // ------- Helpers -------
+    const path = () => {
+      const season = (inSeason.value || '').trim();
+      const week = (selWeek.value || '').trim();
+      if (!season || !week) throw new Error('Season or Week missing');
+      return { season, week };
     };
-    el("#saveGameBtn").onclick = saveGame;
 
-    // No games message
-    el("#noGames").style.display = renderedAny ? "none" : "";
-  }
+    const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
+    const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks'); // user picks: {userId, gameId, pick}
+    const colWeekStandings = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'standings'); // {userId, correct, total, updatedAt}
+    const colOverallStandings = (season) => collection(db, 'seasons', season, 'overall'); // {userId, correct, total, updatedAt}
+    const colUsers = () => collection(db, 'users'); // {displayName}
 
-  async function choose(gameId, side){
-    if (state.lock && !state.isAdmin) return;
-    state.picks[gameId] = side;
-    const ref = doc(db, "picks", state.user.uid, "weeks", state.weekId);
-    await setDoc(ref, { picks: state.picks, updatedAt: Date.now() }, { merge:true });
-    toast();
-    renderGames();
-  }
+    const fmtPct = (c, t) => t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—';
+    const ts = () => serverTimestamp();
 
-  async function saveGame(){
-    if (!state.isAdmin) return;
-    const day  = (el("#gameDay")?.value || "Sunday").trim();
-    const home = el("#homeTeam").value.trim();
-    const away = el("#awayTeam").value.trim();
-    if (!home || !away) return alert("Enter both team names.");
-    await addDoc(collection(db, "weeks", state.weekId, "games"), { day, home, away, createdAt: Date.now() });
-    el("#homeTeam").value=""; el("#awayTeam").value="";
-    toast("Game added");
-    renderGames();
-  }
+    function clearTable(tbody) {
+      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    }
 
-  // ---------- Utilities for console ----------
-  window.seedWeek1 = async function(items){
-    if (!state.isAdmin){ console.warn("Admin only"); return; }
-    const col = collection(db,"weeks",state.weekId,"games");
-    for (const item of items){
-      // Accept either {day,home,away} objects or "Home vs Away" strings (defaults to Sunday)
-      if (typeof item === "string"){
-        const [home, away] = item.split(" vs ").map(s => s.trim());
-        if (home && away){
-          await addDoc(col, { day: "Sunday", home, away, createdAt: Date.now() });
-        }
-      } else if (item && item.home && item.away){
-        await addDoc(col, { day: item.day || "Sunday", home: item.home, away: item.away, createdAt: Date.now() });
+    // ------- Auth wiring -------
+    onAuthStateChanged(auth, (u) => {
+      if (u) {
+        who.textContent = u.email || u.uid;
+        document.getElementById('authForm').style.display = 'none';
+        btnSignOut.style.display = 'inline-block';
+      } else {
+        who.textContent = 'signed out';
+        document.getElementById('authForm').style.display = 'grid';
+        btnSignOut.style.display = 'none';
       }
-    }
-    console.log("Seeded", items.length, "games");
-  };
+    });
 
-  // Delete all games for the current week
-  window.clearGames = async function(){
-    if (!state.isAdmin){ console.warn("Admin only"); return; }
-    const col = collection(db, "weeks", state.weekId, "games");
-    const snap = await getDocs(col);
-    let count = 0;
-    for (const d of snap.docs){
-      await deleteDoc(d.ref);
-      count++;
-    }
-    console.log("Cleared", count, "games for", state.weekId);
-    toast("Cleared " + count + " games");
-    renderGames();
-  };
+    btnSignIn.onclick = async () => {
+      try {
+        await signInWithEmailAndPassword(auth, inEmail.value, inPass.value);
+        authMsg.textContent = 'Signed in.';
+      } catch (e) {
+        authMsg.textContent = e.message;
+      }
+    };
+    btnCreate.onclick = async () => {
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
+        await setDoc(doc(db, 'users', cred.user.uid), { displayName: inEmail.value.split('@')[0], createdAt: ts() }, { merge: true });
+        authMsg.textContent = 'User created & saved.';
+      } catch (e) {
+        authMsg.textContent = e.message;
+      }
+    };
+    btnSignOut.onclick = () => signOut(auth);
 
-  window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
-</script>
+    // ------- Data listeners -------
+    async function attachListeners() {
+      const { season, week } = path();
+
+      // Games
+      if (unsubGames) unsubGames();
+      unsubGames = onSnapshot(query(colGames(season, week), orderBy('kickoff','asc')), (snap) => {
+        renderGames(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+
+      // Week standings
+      if (unsubWeekStandings) unsubWeekStandings();
+      unsubWeekStandings = onSnapshot(query(colWeekStandings(season, week), orderBy('correct','desc')), (snap) => {
+        renderStandings(tblWeekBody, snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+
+      // Overall standings
+      if (unsubOverall) unsubOverall();
+      unsubOverall = onSnapshot(query(colOverallStandings(season), orderBy('correct','desc')), (snap) => {
+        renderStandings(tblOverallBody, snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+    }
+
+    function renderGames(games) {
+      clearTable(tblGamesBody);
+      games.forEach((g, idx) => {
+        const tr = document.createElement('tr');
+
+        const tdIdx = document.createElement('td');
+        tdIdx.textContent = String(idx+1);
+        tr.appendChild(tdIdx);
+
+        const tdMatch = document.createElement('td');
+        tdMatch.innerHTML = `<span class="pill">${g.away}</span> @ <span class="pill">${g.home}</span>`;
+        tr.appendChild(tdMatch);
+
+        const tdKick = document.createElement('td');
+        tdKick.textContent = g.kickoff?.toDate ? g.kickoff.toDate().toLocaleString() : new Date(g.kickoff).toLocaleString();
+        tr.appendChild(tdKick);
+
+        const tdWinner = document.createElement('td');
+        const sel = document.createElement('select');
+        [ '', g.home, g.away, 'TIE' ].forEach(optV => {
+          const o = document.createElement('option');
+          o.value = optV;
+          o.textContent = optV || '— select winner —';
+          if (optV === g.winner) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.onchange = async () => {
+          const { season, week } = path();
+          await updateDoc(doc(db, 'seasons', season, 'weeks', week, 'games', g.id), {
+            winner: sel.value || null, updatedAt: ts()
+          });
+        };
+        tdWinner.appendChild(sel);
+        tr.appendChild(tdWinner);
+
+        const tdSaved = document.createElement('td');
+        tdSaved.textContent = g.winner ? '✓' : '';
+        tr.appendChild(tdSaved);
+
+        tblGamesBody.appendChild(tr);
+      });
+    }
+
+    function renderStandings(tbody, rows) {
+      clearTable(tbody);
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const pct = fmtPct(r.correct || 0, r.total || 0);
+        tr.innerHTML = `
+          <td>${r.displayName || r.userEmail || r.userId || '—'}</td>
+          <td>${r.correct ?? 0}</td>
+          <td>${r.total ?? 0}</td>
+          <td>${pct}</td>
+          <td>${r.updatedAt?.toDate ? r.updatedAt.toDate().toLocaleString() : ''}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ------- Actions -------
+    btnReload.onclick = () => attachListeners();
+
+    btnAddGame.onclick = async () => {
+      const { season, week } = path();
+      const hv = (home.value || '').trim();
+      const av = (away.value || '').trim();
+      if (!hv || !av || !kickoff.value) return alert('Home, Away, and Kickoff are required.');
+      await addDoc(colGames(season, week), {
+        home: hv,
+        away: av,
+        kickoff: new Date(kickoff.value),
+        createdAt: ts(),
+        updatedAt: ts(),
+        winner: null
+      });
+      home.value = '';
+      away.value = '';
+      kickoff.value = '';
+    };
+
+    // Deletes ALL games for the selected week and resets week standings
+    btnClearGames.onclick = async () => {
+      const { season, week } = path();
+      if (!confirm(`Delete ALL games in Season ${season}, Week ${week}? This cannot be undone.`)) return;
+
+      const batch = writeBatch(db);
+      const gSnap = await getDocs(colGames(season, week)); // <-- fixes ReferenceError getDocs
+      gSnap.forEach(docSnap => batch.delete(docSnap.ref));
+
+      const sSnap = await getDocs(colWeekStandings(season, week));
+      sSnap.forEach(docSnap => batch.delete(docSnap.ref));
+
+      await batch.commit();
+      alert('Games and week standings cleared.');
+    };
+
+    btnResetWeekStandings.onclick = async () => {
+      const { season, week } = path();
+      const sSnap = await getDocs(colWeekStandings(season, week));
+      const batch = writeBatch(db);
+      sSnap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      alert('Week standings reset.');
+    };
+
+    // Compute week + overall based on winners vs user picks
+    btnFinalizeWeek.onclick = async () => {
+      const { season, week } = path();
+
+      // Read games with winners set
+      const gamesSnap = await getDocs(colGames(season, week));
+      const games = [];
+      gamesSnap.forEach(d => games.push({ id: d.id, ...d.data() }));
+      if (!games.length) return alert('No games to finalize.');
+      const unresolved = games.filter(g => !g.winner);
+      if (unresolved.length) {
+        if (!confirm(`There are ${unresolved.length} games without a winner. Finalize anyway?`)) return;
+      }
+
+      // Read all picks for the week
+      const picksSnap = await getDocs(colPicks(season, week));
+      const picks = [];
+      picksSnap.forEach(d => picks.push({ id: d.id, ...d.data() }));
+      // Group picks by user
+      const byUser = new Map();
+      for (const p of picks) {
+        if (!byUser.has(p.userId)) byUser.set(p.userId, []);
+        byUser.get(p.userId).push(p);
+      }
+
+      // Load minimal user info (optional)
+      const usersSnap = await getDocs(colUsers());
+      const users = new Map();
+      usersSnap.forEach(u => users.set(u.id, u.data()));
+
+      // Compute week standings
+      const batch = writeBatch(db);
+      for (const [userId, userPicks] of byUser.entries()) {
+        let correct = 0, total = 0;
+        for (const p of userPicks) {
+          const g = games.find(x => x.id === p.gameId);
+          if (!g) continue;
+          if (g.winner) {
+            total++;
+            if (p.pick === g.winner) correct++;
+            if (g.winner === 'TIE' && p.pick === 'TIE') correct++; // optional tie handling
+          }
+        }
+        const userDoc = users.get(userId) || {};
+        const displayName = userDoc.displayName || userDoc.name || userId;
+        const weekRef = doc(db, 'seasons', season, 'weeks', week, 'standings', userId);
+        batch.set(weekRef, { userId, displayName, correct, total, updatedAt: ts() }, { merge: true });
+      }
+
+      // Compute overall: sum across all weeks (cheap version = read all week standings for season)
+      const allWeekRefsSnap = await getDocs(collection(db, 'seasons', season, 'weeks')); // subcollections aren't directly listable
+      // Because Firestore can't list subcollections easily from client, we’ll approximate:
+      // iterate known range 1..18 and read standings for each:
+      const totals = new Map(); // userId -> {correct,total,displayName}
+      for (let w = 1; w <= 18; w++) {
+        const wk = String(w).padStart(2, '0');
+        const wkSnap = await getDocs(colWeekStandings(season, wk));
+        wkSnap.forEach(d => {
+          const v = d.data();
+          if (!totals.has(v.userId)) totals.set(v.userId, { correct:0, total:0, displayName: v.displayName || v.userId });
+          const agg = totals.get(v.userId);
+          agg.correct += (v.correct || 0);
+          agg.total   += (v.total || 0);
+        });
+      }
+      for (const [userId, agg] of totals.entries()) {
+        const overallRef = doc(db, 'seasons', season, 'overall', userId);
+        batch.set(overallRef, { userId, displayName: agg.displayName, correct: agg.correct, total: agg.total, updatedAt: ts() }, { merge: true });
+      }
+
+      await batch.commit();
+      alert('Week finalized and standings updated.');
+    };
+
+    // Auto-attach on load and when week/season changes
+    selWeek.onchange = attachListeners;
+    inSeason.onchange = attachListeners;
+    attachListeners();
+  </script>
 </body>
 </html>
