@@ -118,6 +118,13 @@
       measurementId: "G-MSJHYZ4VG2"
     };
 
+    // --- ADMIN SETUP ---
+    // Replace with your actual UID from Firebase Authentication → Users
+    window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
+
+    state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
+    document.body.classList.toggle("is-admin", state.isAdmin);
+    
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
