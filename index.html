@@ -122,7 +122,7 @@
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
   import {
     initializeFirestore, getFirestore, doc, setDoc, onSnapshot,
-    collection, addDoc, query, orderBy, getDocs, deleteDoc
+    collection, addDoc, query, orderBy, getDocs, deleteDoc, Timestamp
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
   import { collectionGroup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
@@ -150,7 +150,32 @@
   const el = s => document.querySelector(s);
   const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
 
-  const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[] };
+  const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
+
+  function getEarliestKickoffMs(games){
+  let min = null;
+  for (const g of games || []){
+    const ms = typeof g.kickoffTs === "number" ? g.kickoffTs
+             : (g.kickoff ? Date.parse(g.kickoff) : null);
+    if (Number.isFinite(ms)) min = (min==null) ? ms : Math.min(min, ms);
+  }
+  return min;
+}
+
+// 30 minutes before first kickoff
+function computeAutoLockAtMs(){
+  const first = getEarliestKickoffMs(state.games);
+  if (first == null) return null;
+  return first - 30 * 60 * 1000;
+}
+
+// true if picks are locked for non-admins
+function isWriteLocked(){
+  const now = Date.now();
+  const autoLock = state.lockAt ? (now >= state.lockAt) : false;
+  return state.lock || autoLock;
+}
+
 
   // --- Auth UI ---
   el("#signInBtn").onclick = async () => {
@@ -210,9 +235,18 @@
     // Lock meta
     const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
     unsubLock = onSnapshot(lockRef, s => {
-      state.lock = s.exists() ? !!s.data().locked : false;
-      el("#lockBadge").textContent = state.lock ? "Finalized" : "Open";
-      el("#lockBadge").className   = "lock " + (state.lock ? "danger" : "muted");
+      const d = s.exists() ? s.data() : {};
+      state.lock = !!d.locked;
+      state.lockAt = (d.lockAt && d.lockAt.seconds) ? (d.lockAt.seconds * 1000) : null;
+      // Badge text: show Finalized, or a countdown/locked state
+      const now = Date.now();
+      const autoLocked = state.lockAt ? now >= state.lockAt : false;
+      let label = "Open";
+      if (state.lock) label = "Finalized";
+      else if (state.lockAt && !autoLocked) label = "Locks " + new Date(state.lockAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      else if (autoLocked) label = "Locked (kickoff)";
+      el("#lockBadge").textContent = label;
+      el("#lockBadge").className   = "lock " + ((state.lock || autoLocked) ? "danger" : "muted");
       el("#adminWeekLock").checked = state.lock;
       renderGames();
     }, e => console.error("lock listener", e));
@@ -227,6 +261,20 @@
       state.games = []; snap.forEach(d => state.games.push({ id:d.id, ...d.data() }));
       el("#noGames").style.display = state.games.length ? "none" : "";
       renderGames();
+     // Admin auto-sync of lockAt: keep meta.lockAt = (earliest kickoff - 30m)
+     if (state.isAdmin){
+       const ms = computeAutoLockAtMs();
+       const want = ms ? Timestamp.fromMillis(ms) : null;
+       // Only write if changed or not set
+       onSnapshot(lockRef, s => {
+         const d = s.exists() ? s.data() : {};
+         const cur = d.lockAt && d.lockAt.seconds ? d.lockAt.seconds * 1000 : null;
+         if ((want && cur !== ms) || (!want && cur != null)) {
+           setDoc(lockRef, want ? { lockAt: want } : { lockAt: null }, { merge: true }).catch(console.error);
+         }
+       }, () => {});
+     }
+      
     }, e => console.error("games listener", e));
 
     // My picks
@@ -290,7 +338,7 @@
       if (g.winner === "away") away.classList.add("result");
 
       // lock picks for non-admin when finalized
-      if (state.lock && !state.isAdmin){ home.classList.add("disabled"); away.classList.add("disabled"); }
+      if (!state.isAdmin && isWriteLocked()){ home.classList.add("disabled"); away.classList.add("disabled"); }
 
       home.onclick = () => choose(g.id, "home");
       away.onclick = () => choose(g.id, "away");
@@ -349,7 +397,7 @@
 
   // --- Actions ---
   async function choose(gameId, side){
-    if (state.lock && !state.isAdmin) return;
+    if (!state.isAdmin && isWriteLocked()) return;
     state.picks[gameId] = side;
     const ref = doc(db, "picks", state.user.uid, "weeks", state.weekId);
     await setDoc(ref, { weekId: state.weekId, picks: state.picks, updatedAt: Date.now(), email: state.user.email }, { merge:true });
