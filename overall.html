@@ -145,55 +145,50 @@
       $refreshBtn.textContent = 'Recalculating…';
       try {
         const byUser = new Map();
-        const add = (uid, name, week, correct, pts) => {
+    
+        const add = (uid, name, week, wins, losses, points, correctFlag) => {
           if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name, correct: 0, points: 0, _weeks: new Set() });
           const agg = byUser.get(uid);
+    
           if (name && !agg.name) agg.name = name;
-          if (correct) agg.correct += 1;
-          agg.points += Number(pts ?? (correct ? 1 : 0));
+    
+          const winsNum   = Number(wins   ?? 0) || 0;
+          const lossesNum = Number(losses ?? 0) || 0;
+          const ptsNum    = Number(points ?? (winsNum || 0)) || 0;   // fall back: points = wins
+          const corrFromFlag = (correctFlag === true) ? 1 : 0;
+    
+          agg.correct += (winsNum || corrFromFlag);
+          agg.points  += ptsNum;
           if (week !== undefined && week !== null) agg._weeks.add(String(week));
         };
-
-        // Pull all weeks docs anywhere in the DB
+    
+        // Read all week docs anywhere in the DB
         const weeksSnap = await getDocs(collectionGroup(db, 'weeks'));
-        let used = 'collectionGroup(weeks)';
-
+        const used = 'collectionGroup(weeks)';
+    
         for (const w of weeksSnap.docs) {
-          const weekId = w.id;               // e.g., "2025w04"
-          const parent = w.ref.parent;       // …/picks/{uid}/weeks
-          const uid = parent?.parent?.id || 'unknown';
-          const d = w.data();
-
-          // Case 1: totals stored on the week doc
-          if (d && (d.points !== undefined || d.score !== undefined || d.total !== undefined || d.correct !== undefined || d.result !== undefined)) {
-            const name = d.userName ?? d.name;
-            const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-            const pts = d.points ?? d.score ?? d.total;
-            add(uid, name, weekId, correct, pts);
-            continue;
-          }
-
-          // Case 2: per-game picks subcollection under the week
-          try {
-            const picksSnap = await getDocs(collection(w.ref, 'picks'));
-            for (const p of picksSnap.docs) {
-              const pd = p.data();
-              const name = pd.userName ?? pd.name;
-              const correct = pd.correct === true || pd.isCorrect === true || pd.result === 'win';
-              const pts = pd.points;
-              add(uid, name, weekId, correct, pts);
-            }
-            used = "collectionGroup(weeks)+sub('picks')";
-          } catch {/* ignore if no subcollection */}
+          const weekId = w.id;                         // e.g. "2025-Week-01"
+          const parent = w.ref.parent;                 // …/picks/{uid}/weeks
+          const uid    = parent?.parent?.id || 'unknown';
+          const d      = w.data() || {};
+    
+          // Flexible field mapping:
+          const name       = d.userName ?? d.name ?? d.displayName;
+          const wins       = d.wins ?? d.win ?? d.correct ?? d.correctCount;
+          const losses     = d.losses ?? d.loss ?? d.incorrect ?? d.incorrectCount;
+          const points     = d.points ?? d.total ?? d.score ?? d.wins; // prefer points/total/score, else wins
+          const correctFlg = d.correct === true || d.isCorrect === true || d.result === 'win';
+    
+          add(uid, name, weekId, wins, losses, points, correctFlg);
         }
-
+    
         if (!byUser.size) {
           $sourceLabel.textContent = 'No data found';
-          $tbody.innerHTML = '<tr><td colspan="5">No picks detected. Check collection names/fields.</td></tr>';
+          $tbody.innerHTML = '<tr><td colspan="5">No week docs contained recognizable fields (wins/points). Adjust mapping or import data.</td></tr>';
           return;
         }
-
-        // optional: look up display names from /users/{uid}
+    
+        // Optional: pull names from /users/{uid} when missing
         const results = Array.from(byUser.values());
         for (const r of results) {
           if (!r.name) {
@@ -202,14 +197,15 @@
               if (u.exists()) r.name = u.data().displayName ?? u.data().name ?? r.userId;
             } catch {}
           }
-          r.weeks = r._weeks.size; delete r._weeks;
+          r.weeks = r._weeks.size;
+          delete r._weeks;
         }
-
+    
         const rows = results
           .map(r => ({ ...r, points: Number(r.points || 0), correct: Number(r.correct || 0) }))
           .sort((a,b)=> (b.points - a.points) || (b.correct - a.correct) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
-
-        $sourceLabel.textContent = used + ' (computed)';
+    
+        $sourceLabel.textContent = used + ' (computed: wins/points on week docs)';
         render(rows);
       } catch (e) {
         showError(e);
@@ -218,6 +214,7 @@
         $refreshBtn.textContent = 'Recalculate Now';
       }
     }
+
 
     (async ()=>{
       // Skip overallTotals since your main data lives under weeks/*
