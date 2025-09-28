@@ -61,15 +61,7 @@
     </div>
   </div>
   
-  <script>
-    window.FIREBASE_CONFIG = {
-      apiKey: "YOUR_REAL_KEY",
-      authDomain: "your-project-id.firebaseapp.com",
-      projectId: "your-project-id",
-    };
-    window.BUILD_ID = "overall-2025-09-28-22:25"; // optional sanity tag
-  </script>
-  
+ 
   <!-- Firebase (v10+ modular) via ESM CDN. If you bundle, replace with your imports. -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -77,12 +69,16 @@
 
     // ─── Configure YOUR project ────────────────────────────────────────────────
     // Replace with your actual config or import from a shared config file.
-    const firebaseConfig = window.FIREBASE_CONFIG ?? {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_AUTH_DOMAIN",
-      projectId: "YOUR_PROJECT_ID",
+    const firebaseConfig = {
+      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+      authDomain: "nfl-picks-b83c2.firebaseapp.com",
+      projectId: "nfl-picks-b83c2",
+      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
+      messagingSenderId: "802058909501",
+      appId: "1:802058909501:web:bb935c188891934de07754",
+      measurementId: "G-MSJHYZ4VG2"
     };
-
+    window.BUILD_ID = "overall-2025-09-28-22:25"; // optional sanity tag
     const BUILD_ID = (window.BUILD_ID ?? new Date().toISOString());
     document.getElementById('build').textContent = `BUILD: ${BUILD_ID}`;
 
