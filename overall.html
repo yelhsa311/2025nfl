@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NFL Picks – Overall Standings</title>
+  <title>NFL Picks – Overall Standings (from picks)</title>
   <style>
     :root { --gap: 14px; }
     html,body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:#0b1220; color:#e6edf3;}
@@ -31,7 +31,7 @@
 <body>
   <div class="wrap">
     <h1>Overall Standings</h1>
-    <div class="meta">Totals across <strong>all weeks</strong>. We read every <code>weeks</code> doc via <code>collectionGroup('weeks')</code>, sum each user's <strong>wins</strong> and <strong>losses</strong>, and display their <strong>name</strong> (from week docs or <code>/users/{uid}</code>).</div>
+    <div class="meta">Totals across <strong>all weeks</strong>. Reads every <code>weeks</code> doc via <code>collectionGroup('weeks')</code> and, for each one, opens the <code>picks</code> subcollection to count wins/losses (no need to store totals on the week doc). Names come from the week doc or <code>/publicUsers/{uid}</code>.</div>
 
     <div class="card">
       <div class="row">
@@ -57,18 +57,18 @@
         </tbody>
       </table>
 
-      <div class="footer" id="sourceHint">Source: <span id="sourceLabel">detecting…</span></div>
+      <div class="footer" id="sourceHint">Source: <span id="sourceLabel">collectionGroup(weeks) → picks</span></div>
       <div id="err" class="error hidden"></div>
     </div>
   </div>
 
   <script>
-    // Your real Firebase web config
+    // Your Firebase web config
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
       authDomain: "nfl-picks-b83c2.firebaseapp.com",
       projectId: "nfl-picks-b83c2",
-      storageBucket: "nfl-picks-b83c2.firebasestorage.app", // if console shows appspot.com instead, swap it
+      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
       messagingSenderId: "802058909501",
       appId: "1:802058909501:web:bb935c188891934de07754",
       measurementId: "G-MSJHYZ4VG2"
@@ -79,7 +79,7 @@
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { getFirestore, collectionGroup, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { getFirestore, collectionGroup, collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const $tbody = document.getElementById('tbody');
     const $sourceLabel = document.getElementById('sourceLabel');
@@ -92,23 +92,29 @@
     const firebaseConfig = window.FIREBASE_CONFIG;
     document.getElementById('build').textContent = `BUILD: ${window.BUILD_ID}`;
 
-    if (!firebaseConfig || !firebaseConfig.projectId) showError('❗ FIREBASE_CONFIG is missing.');
-
     const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // anonymous auth so rules like isAuthed() pass for read
     try { await signInAnonymously(auth); } catch(e) { console.warn('Anonymous auth failed (continuing):', e); }
 
     // helpers
     function pick(d, keys) {
-      // case-insensitive first match of a non-null field
       const map = new Map(Object.keys(d).map(k => [k.toLowerCase(), k]));
       for (const k of keys) { const real = map.get(k.toLowerCase()); if (real != null && d[real] != null) return d[real]; }
       return undefined;
     }
     const toNum = (v) => { if (v === true) return 1; if (v === false || v == null) return 0; const n = Number(String(v).replace(/[^0-9.-]/g, "")); return Number.isFinite(n) ? n : 0; };
+    const isCorrect = (d) => {
+      const c = d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result ?? d.outcome;
+      if (typeof c === 'boolean') return c;
+      if (typeof c === 'number') return c > 0;
+      if (typeof c === 'string') {
+        const s = c.toLowerCase();
+        return ['true','t','1','win','w','correct'].includes(s);
+      }
+      return false;
+    };
 
     function render(rows){
       $tbody.innerHTML = '';
@@ -124,11 +130,11 @@
       });
     }
 
-    async function computeFromWeekTotals(){
+    async function computeFromPicks(){
       $refreshBtn.disabled = true; $refreshBtn.textContent = 'Recalculating…';
       try {
         const byUser = new Map();
-        const add = (uid, name, week, wins, losses) => {
+        const add = (uid, name, wins, losses) => {
           if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name, wins: 0, losses: 0 });
           const agg = byUser.get(uid);
           if (name && !agg.name) agg.name = name;
@@ -137,44 +143,38 @@
         };
 
         const weeksSnap = await getDocs(collectionGroup(db, 'weeks'));
-        let used = 'collectionGroup(weeks) totals';
 
-        for (const w of weeksSnap.docs) {
-          const weekId = w.id;                          // e.g. "2025-Week-01"
-          const parent = w.ref.parent;                  // …/picks/{uid}/weeks
-          const uid    = parent?.parent?.id || 'unknown';
-          const d      = w.data() || {};
+        // For each week doc, read its picks subcollection and sum
+        await Promise.all(weeksSnap.docs.map(async (wDoc) => {
+          const parent = wDoc.ref.parent;              // …/picks/{uid}/weeks
+          const uid = parent?.parent?.id || 'unknown';
+          const d = wDoc.data() || {};
+          const nameOnWeek = pick(d, ['userName','name','displayName','player','owner']);
 
-          // name preference: from week doc first
-          const name   = pick(d, ['userName','name','displayName','player','owner']);
-          // totals
-          const wins   = pick(d, ['wins','win','correct','correctcount','correctpicks','w']);
-          const losses = pick(d, ['losses','loss','incorrect','incorrectcount','l']);
-
-          add(uid, name, weekId, wins, losses);
-        }
+          try {
+            const picksSnap = await getDocs(collection(wDoc.ref, 'picks'));
+            let wins = 0, losses = 0;
+            picksSnap.forEach(p => { isCorrect(p.data()) ? wins++ : losses++; });
+            add(uid, nameOnWeek, wins, losses);
+          } catch (e) {
+            console.warn('picks read failed for uid', uid, 'week', wDoc.id, e);
+          }
+        }));
 
         if (!byUser.size) {
-          $sourceLabel.textContent = 'No data found';
-          const first = weeksSnap.docs[0]?.data?.() || {}; const keys = Object.keys(first).join(', ') || '—';
-          $tbody.innerHTML = `<tr><td colspan="4">No recognizable totals (wins/losses) on week docs.<br/><small>Sample keys: ${keys}</small></td></tr>`;
+          $sourceLabel.textContent = 'No data found (no picks)';
+          $tbody.innerHTML = `<tr><td colspan="4">No picks docs were found under any week. Ensure picks are stored in /picks/{uid}/weeks/{weekId}/picks/* with a field like <code>correct: true/false</code>.</td></tr>`;
           return;
         }
 
+        // Enrich names from /publicUsers when missing
         const results = Array.from(byUser.values());
-        // 1) Enrich names from /users/{uid} (wait for all to finish)
         await Promise.all(results.map(async (r) => {
           if (!r.name) {
             try {
-              const snap = await getDoc(doc(db, "publicUsers", r.userId));
-              if (snap.exists()) {
-                const d = snap.data() || {};
-                r.name = d.displayName || d.userName || d.name || r.userId;
-                console.log(`looked up displayName for uid=${r.userId} => ${r.name}`);
-              }
-            } catch (e) {
-              console.warn("user lookup failed:", r.userId, e);
-            }
+              const u = await getDoc(doc(db, 'publicUsers', r.userId));
+              if (u.exists()) r.name = u.data().displayName || r.userId;
+            } catch {}
           }
         }));
 
@@ -182,14 +182,14 @@
           .map(r => ({ ...r, wins: toNum(r.wins), losses: toNum(r.losses) }))
           .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
 
-        $sourceLabel.textContent = used + ' (computed: wins/losses + name lookup)';
+        $sourceLabel.textContent = 'collectionGroup(weeks) → picks (computed wins/losses)';
         render(rows);
       } catch (e) { showError(e); }
       finally { $refreshBtn.disabled = false; $refreshBtn.textContent = 'Recalculate Now'; }
     }
 
-    (async ()=>{ await computeFromWeekTotals(); })();
-    $refreshBtn.addEventListener('click', computeFromWeekTotals);
+    (async ()=>{ await computeFromPicks(); })();
+    $refreshBtn.addEventListener('click', computeFromPicks);
   </script>
 </body>
 </html>
