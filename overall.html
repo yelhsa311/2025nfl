@@ -25,12 +25,13 @@
     .pill{background:#111827; border:1px solid #1f2937; padding: 3px 8px; border-radius:999px; font-size:12px}
     .footer{opacity:.7; font-size:12px; margin-top:14px}
     .hidden{display:none}
+    .error{background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px 12px;border-radius:12px;margin-top:12px;white-space:pre-wrap}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Overall Standings</h1>
-    <div class="meta">Live view of totals across all weeks. Auto-uses cached totals if present; otherwise computes from picks on the fly.</div>
+    <div class="meta">Live totals across all weeks. Loads cached totals if present; otherwise computes from your picks collections.</div>
 
     <div class="card">
       <div class="row">
@@ -58,36 +59,53 @@
       </table>
 
       <div class="footer" id="sourceHint">Source: <span id="sourceLabel">detecting…</span></div>
+      <div id="err" class="error hidden"></div>
     </div>
   </div>
-  
- 
-  <!-- Firebase (v10+ modular) via ESM CDN. If you bundle, replace with your imports. -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { getFirestore, collection, collectionGroup, getDocs, onSnapshot, query, orderBy, where, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // ─── Configure YOUR project ────────────────────────────────────────────────
-    // Replace with your actual config or import from a shared config file.
-    const firebaseConfig = {
+  <script>
+    // Your real Firebase web config
+    window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
       authDomain: "nfl-picks-b83c2.firebaseapp.com",
       projectId: "nfl-picks-b83c2",
-      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
+      storageBucket: "nfl-picks-b83c2.firebasestorage.app", // if console shows appspot.com, swap it
       messagingSenderId: "802058909501",
       appId: "1:802058909501:web:bb935c188891934de07754",
       measurementId: "G-MSJHYZ4VG2"
     };
-    window.BUILD_ID = "overall-2025-09-28-22:25"; // optional sanity tag
-    const BUILD_ID = (window.BUILD_ID ?? new Date().toISOString());
-    document.getElementById('build').textContent = `BUILD: ${BUILD_ID}`;
+    window.BUILD_ID = `overall-${new Date().toISOString()}`;
+  </script>
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+  <script type="module">
+    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import { getFirestore, collection, collectionGroup, getDocs, onSnapshot, query, orderBy, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const $tbody = document.getElementById('tbody');
     const $sourceLabel = document.getElementById('sourceLabel');
     const $refreshBtn = document.getElementById('refreshBtn');
+    const $err = document.getElementById('err');
+
+    function showError(msg){
+      $err.textContent = msg instanceof Error ? (msg.stack || msg.message) : String(msg);
+      $err.classList.remove('hidden');
+      console.error(msg);
+    }
+
+    const firebaseConfig = window.FIREBASE_CONFIG;
+    document.getElementById('build').textContent = `BUILD: ${window.BUILD_ID}`;
+
+    if (!firebaseConfig || !firebaseConfig.projectId) {
+      showError('❗ FIREBASE_CONFIG is missing.');
+    }
+
+    const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Sign in anonymously so rules requiring auth will pass
+    try { await signInAnonymously(auth); } catch(e) { console.warn('Anonymous auth failed (continuing):', e); }
 
     const STATE = { last: [] };
 
@@ -103,7 +121,7 @@
           <td class="rank">${i+1}</td>
           <td>${escapeHtml(r.name ?? r.userName ?? r.userId ?? 'Unknown')}</td>
           <td class="num">${r.correct ?? 0}</td>
-          <td class="num">${(r.points ?? r.correct ?? 0)}</td>
+          <td class="num">${r.points ?? r.correct ?? 0}</td>
           <td class="num">${r.weeks ?? '-'}</td>
         `;
         $tbody.appendChild(tr);
@@ -114,27 +132,7 @@
       return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
     }
 
-    // Try 1: Listen to a cached totals collection if it exists (fast + live)
-    async function tryLiveCachedTotals(){
-      try{
-        const ref = collection(db, 'overallTotals');
-        // If collection exists, onSnapshot will stream documents.
-        const unsub = onSnapshot(query(ref, orderBy('points','desc')), snap => {
-          const rows = snap.docs.map(d=>({ id:d.id, ...d.data() }));
-          if (rows.length){
-            $sourceLabel.textContent = 'overallTotals (live)';
-            STATE.last = normalizeRows(rows);
-            render(STATE.last);
-          }
-        }, err => console.warn('overallTotals snapshot err', err));
-        // Also do a one-time check to confirm existence
-        const check = await getDocs(ref);
-        if (!check.empty){ return unsub; }
-        unsub();
-      }catch(e){ /* collection may not exist yet */ }
-      return null;
-    }
-
+    // Normalize + sort rows
     function normalizeRows(rows){
       return rows.map(r=>({
         userId: r.userId ?? r.id,
@@ -145,134 +143,141 @@
       })).sort((a,b)=> (b.points - a.points) || (b.correct - a.correct) || String(a.name).localeCompare(String(b.name)));
     }
 
-    // Try 2: Compute from picks (works whether picks are in a top-level collection
-    // or as user subcollections via collectionGroup("picks")).
-async function computeFromPicks(){
-  $refreshBtn.disabled = true;
-  $refreshBtn.textContent = 'Recalculating…';
-  try {
-    const byUser = new Map<string, {userId:string, name?:string, correct:number, points:number, _weeks:Set<string>}>();
-
-    // helper to add a single pick-ish record
-    const add = (uid:string, name:string|undefined, week:string|number|undefined, correct:boolean|undefined, pts:number|undefined) => {
-      if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name, correct: 0, points: 0, _weeks: new Set() });
-      const agg = byUser.get(uid)!;
-      if (name && !agg.name) agg.name = name;
-      if (correct) agg.correct += 1;
-      agg.points += Number(pts ?? (correct ? 1 : 0));
-      if (week !== undefined && week !== null) agg._weeks.add(String(week));
-    };
-
-    let used = '';
-
-    // (A) Try flat top-level /picks docs (some apps store each pick here)
-    try {
-      const top = await getDocs(collection(db, 'picks'));
-      if (!top.empty) {
-        used = '/picks (flat)';
-        for (const ds of top.docs) {
-          const d:any = ds.data();
-          const uid = d.userId ?? d.uid ?? ds.id;
-          const name = d.userName ?? d.name;
-          const week = d.week ?? d.weekNumber;
-          const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-          const pts = d.points;
-          add(uid, name, week, correct, pts);
-        }
-      }
-    } catch {/* ignore and fall through */}
-
-    // (B) If nothing yet, try /picks/{uid}/weeks/{week}/picks
-    if (!byUser.size) {
-      try {
-        used = '/picks/{uid}/weeks/{week}/picks';
-        const usersSnap = await getDocs(collection(db, 'picks'));
-        for (const u of usersSnap.docs) {
-          const uid = u.id;
-          const weeksRef = collection(u.ref, 'weeks');
-          const weeksSnap = await getDocs(weeksRef);
-          for (const w of weeksSnap.docs) {
-            const weekId = w.id;
-            try {
-              const picksRef = collection(w.ref, 'picks'); // subcollection holding each game pick
-              const picksSnap = await getDocs(picksRef);
-              if (!picksSnap.empty) {
-                for (const p of picksSnap.docs) {
-                  const d:any = p.data();
-                  const name = d.userName ?? d.name;
-                  const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-                  const pts = d.points;
-                  add(uid, name, weekId, correct, pts);
-                }
-              }
-            } catch {/* may not exist; fall back to (C) */}
+    // 1) Try cached totals
+    async function tryLiveCachedTotals(){
+      try{
+        const ref = collection(db, 'overallTotals');
+        const unsub = onSnapshot(ref, snap => {
+          const rows = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+          if (rows.length){
+            $sourceLabel.textContent = 'overallTotals (live)';
+            STATE.last = normalizeRows(rows);
+            render(STATE.last);
           }
-        }
-      } catch {/* ignore */}
+        }, err => console.warn('overallTotals snapshot err', err));
+        const check = await getDocs(ref);
+        if (!check.empty){ return unsub; }
+        unsub();
+      }catch(e){ /* ignore */ }
+      return null;
     }
 
-    // (C) If still nothing, treat each /weeks/{week} doc AS the “pick” (fields on the week doc)
-    if (!byUser.size) {
+    // 2) Compute from your structure
+    async function computeFromPicks(){
+      $refreshBtn.disabled = true;
+      $refreshBtn.textContent = 'Recalculating…';
       try {
-        used = '/picks/{uid}/weeks/{week} (docs hold results)';
-        const usersSnap = await getDocs(collection(db, 'picks'));
-        for (const u of usersSnap.docs) {
-          const uid = u.id;
-          const weeksRef = collection(u.ref, 'weeks');
-          const weeksSnap = await getDocs(weeksRef);
-          for (const w of weeksSnap.docs) {
-            const d:any = w.data();
-            const name = d.userName ?? d.name;
-            // try common field names; adjust to your schema if different
-            const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-            const pts = d.points ?? d.score ?? d.total ?? undefined;
-            add(uid, name, w.id, correct, pts);
-          }
-        }
-      } catch {/* ignore */}
-    }
+        const byUser = new Map();
+        const add = (uid, name, week, correct, pts) => {
+          if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name, correct: 0, points: 0, _weeks: new Set() });
+          const agg = byUser.get(uid);
+          if (name && !agg.name) agg.name = name;
+          if (correct) agg.correct += 1;
+          agg.points += Number(pts ?? (correct ? 1 : 0));
+          if (week !== undefined && week !== null) agg._weeks.add(String(week));
+        };
 
-    if (!byUser.size) {
-      $sourceLabel.textContent = 'No data found';
-      $tbody.innerHTML = '<tr><td colspan="5">No picks detected. Check collection names/fields.</td></tr>';
-      return;
-    }
+        let used = '';
 
-    // Optional: look up display names from /users/{uid}
-    const results = Array.from(byUser.values());
-    for (const r of results) {
-      if (!r.name) {
+        // (A) flat /picks (if you ever stored picks flat)
         try {
-          const u = await getDoc(doc(db, 'users', r.userId));
-          if (u.exists()) r.name = (u.data() as any).displayName ?? (u.data() as any).name ?? r.userId;
-        } catch {/* ignore */}
+          const top = await getDocs(collection(db, 'picks'));
+          if (!top.empty) {
+            used = '/picks (flat)';
+            for (const ds of top.docs) {
+              const d = ds.data();
+              // If this doc is actually a user-doc container, it won't have pick fields; we'll still proceed to (B)
+              if (d && (d.correct !== undefined || d.points !== undefined || d.result !== undefined)) {
+                const uid = d.userId ?? d.uid ?? ds.id;
+                const name = d.userName ?? d.name;
+                const week = d.week ?? d.weekNumber;
+                const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
+                const pts = d.points;
+                add(uid, name, week, correct, pts);
+              }
+            }
+          }
+        } catch {}
+
+        // (B) /picks/{uid}/weeks/{week}/picks (your common shape)
+        if (!byUser.size) {
+          try {
+            used = '/picks/{uid}/weeks/{week}/picks';
+            const usersSnap = await getDocs(collection(db, 'picks'));
+            for (const u of usersSnap.docs) {
+              const uid = u.id;
+              const weeksSnap = await getDocs(collection(u.ref, 'weeks'));
+              for (const w of weeksSnap.docs) {
+                try {
+                  const picksSnap = await getDocs(collection(w.ref, 'picks'));
+                  if (!picksSnap.empty) {
+                    for (const p of picksSnap.docs) {
+                      const d = p.data();
+                      const name = d.userName ?? d.name;
+                      const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
+                      const pts = d.points;
+                      add(uid, name, w.id, correct, pts);
+                    }
+                  }
+                } catch {/* no subcollection; fall through to (C) */}
+              }
+            }
+          } catch {}
+        }
+
+        // (C) /picks/{uid}/weeks/{week} (week docs hold totals)
+        if (!byUser.size) {
+          try {
+            used = '/picks/{uid}/weeks/{week} (doc totals)';
+            const usersSnap = await getDocs(collection(db, 'picks'));
+            for (const u of usersSnap.docs) {
+              const uid = u.id;
+              const weeksSnap = await getDocs(collection(u.ref, 'weeks'));
+              for (const w of weeksSnap.docs) {
+                const d = w.data();
+                const name = d.userName ?? d.name;
+                const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
+                const pts = d.points ?? d.score ?? d.total;
+                add(uid, name, w.id, correct, pts);
+              }
+            }
+          } catch {}
+        }
+
+        if (!byUser.size) {
+          $sourceLabel.textContent = 'No data found';
+          $tbody.innerHTML = '<tr><td colspan="5">No picks detected. Check collection names/fields.</td></tr>';
+          return;
+        }
+
+        const results = Array.from(byUser.values());
+        for (const r of results) {
+          if (!r.name) {
+            try {
+              const u = await getDoc(doc(db, 'users', r.userId));
+              if (u.exists()) r.name = u.data().displayName ?? u.data().name ?? r.userId;
+            } catch {}
+          }
+          r.weeks = r._weeks.size; delete r._weeks;
+        }
+
+        const rows = results
+          .map(r => ({ ...r, points: Number(r.points || 0), correct: Number(r.correct || 0) }))
+          .sort((a,b)=> (b.points - a.points) || (b.correct - a.correct) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
+
+        $sourceLabel.textContent = used + ' (computed)';
+        render(rows);
+      } catch (e) {
+        showError(e);
+      } finally {
+        $refreshBtn.disabled = false;
+        $refreshBtn.textContent = 'Recalculate Now';
       }
-      (r as any).weeks = r._weeks.size; delete (r as any)._weeks;
     }
 
-    // sort + render
-    const rows = results
-      .map(r => ({ ...r, points: Number(r.points || 0), correct: Number(r.correct || 0) }))
-      .sort((a,b)=> (b.points - a.points) || (b.correct - a.correct) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
-
-    $sourceLabel.textContent = used + ' (computed)';
-    render(rows);
-  } catch (e) {
-    console.error(e);
-    $tbody.innerHTML = `<tr><td colspan="5">Error: ${e}</td></tr>`;
-  } finally {
-    $refreshBtn.disabled = false;
-    $refreshBtn.textContent = 'Recalculate Now';
-  }
-}
-
-
-    // Init
-    (async()=>{
+    (async ()=>{
       const unsub = await tryLiveCachedTotals();
-      if (!unsub){
-        await computeFromPicks();
-      }
+      if (!unsub){ await computeFromPicks(); }
     })();
 
     $refreshBtn.addEventListener('click', computeFromPicks);
