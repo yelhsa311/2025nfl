@@ -451,7 +451,7 @@
       gamesSnap.forEach(d => { const g=d.data(); if (g.winner==="home"||g.winner==="away"){ winners[d.id]=g.winner; totalGames++; } });
 
       // Pull all users' picks for this week via collectionGroup
-      const cg = await getDocs(query(collectionGroup(db, "weeks"),));
+      const cg = await getDocs(collectionGroup(db, "weeks"));
       const rows = [];
       cg.forEach(docSnap => {
         const data = docSnap.data();
