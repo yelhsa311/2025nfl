@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NFL Picks – Overall Standings (from picks)</title>
+  <title>NFL Picks – Overall Standings</title>
   <style>
     :root { --gap: 14px; }
     html,body{font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; background:#0b1220; color:#e6edf3;}
     .wrap{max-width: 1100px; margin: 36px auto; padding: 0 16px;}
     h1{font-size: clamp(22px, 2.8vw, 32px); margin: 0 0 12px}
-    .meta{opacity:.8; font-size: 13px; margin-bottom: 22px}
+    .meta{opacity:.85; font-size: 13px; margin-bottom: 22px}
     .card{background:#0f172a; border:1px solid #1f2937; border-radius:16px; box-shadow: 0 10px 22px rgba(0,0,0,.25); padding:18px}
     .row{display:flex; gap:var(--gap); flex-wrap:wrap; align-items:center}
     .row > *{flex:1}
@@ -31,16 +31,17 @@
 <body>
   <div class="wrap">
     <h1>Overall Standings</h1>
-    <div class="meta">Totals across <strong>all weeks</strong>. Reads every <code>weeks</code> doc via <code>collectionGroup('weeks')</code> and, for each one, opens the <code>picks</code> subcollection to count wins/losses (no need to store totals on the week doc). Names come from the week doc or <code>/publicUsers/{uid}</code>.</div>
+    <div class="meta">
+      Totals across <strong>all weeks</strong>. We read every <code>weeks</code> doc via <code>collectionGroup('weeks')</code>,
+      sum each user’s <strong>wins</strong> and <strong>losses</strong> from the week doc fields, and display their name from
+      <code>/publicUsers/{uid}</code>. (If a week also has a <code>picks</code> subcollection with per-game docs,
+      we’ll include those too as a fallback.)
+    </div>
 
     <div class="card">
       <div class="row">
-        <div>
-          <div><span class="pill" id="build">BUILD: unknown</span></div>
-        </div>
-        <div class="right">
-          <button id="refreshBtn">Recalculate Now</button>
-        </div>
+        <div><span class="pill" id="build">BUILD: loading…</span></div>
+        <div class="right"><button id="refreshBtn">Recalculate Now</button></div>
       </div>
 
       <table id="standings">
@@ -52,18 +53,16 @@
             <th class="num">Losses</th>
           </tr>
         </thead>
-        <tbody id="tbody">
-          <tr><td colspan="4">Loading…</td></tr>
-        </tbody>
+        <tbody id="tbody"><tr><td colspan="4">Loading…</td></tr></tbody>
       </table>
 
-      <div class="footer" id="sourceHint">Source: <span id="sourceLabel">collectionGroup(weeks) → picks</span></div>
+      <div class="footer">Source: <span id="sourceLabel">collectionGroup(weeks) totals</span></div>
       <div id="err" class="error hidden"></div>
     </div>
   </div>
 
+  <!-- Firebase config -->
   <script>
-    // Your Firebase web config
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
       authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -79,47 +78,34 @@
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { getFirestore, collectionGroup, collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { getFirestore, collectionGroup, getDocs, doc, getDoc, collection } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const $tbody = document.getElementById('tbody');
     const $sourceLabel = document.getElementById('sourceLabel');
     const $refreshBtn = document.getElementById('refreshBtn');
     const $err = document.getElementById('err');
-
-    const showError = (msg) => { $err.textContent = msg instanceof Error ? (msg.stack || msg.message) : String(msg); $err.classList.remove('hidden'); console.error(msg); };
-    const escapeHtml = (s) => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
-
-    const firebaseConfig = window.FIREBASE_CONFIG;
     document.getElementById('build').textContent = `BUILD: ${window.BUILD_ID}`;
 
-    const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    try { await signInAnonymously(auth); } catch(e) { console.warn('Anonymous auth failed (continuing):', e); }
-
-    // helpers
-    function pick(d, keys) {
-      const map = new Map(Object.keys(d).map(k => [k.toLowerCase(), k]));
-      for (const k of keys) { const real = map.get(k.toLowerCase()); if (real != null && d[real] != null) return d[real]; }
-      return undefined;
-    }
-    const toNum = (v) => { if (v === true) return 1; if (v === false || v == null) return 0; const n = Number(String(v).replace(/[^0-9.-]/g, "")); return Number.isFinite(n) ? n : 0; };
-    const isCorrect = (d) => {
-      const c = d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result ?? d.outcome;
+    const escapeHtml = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    const toNum = v => { if (v === true) return 1; if (v === false || v == null) return 0; const n = Number(String(v).replace(/[^0-9.-]/g,"")); return Number.isFinite(n)?n:0; };
+    const isCorrect = d => {
+      const c = d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result;
       if (typeof c === 'boolean') return c;
-      if (typeof c === 'number') return c > 0;
-      if (typeof c === 'string') {
-        const s = c.toLowerCase();
-        return ['true','t','1','win','w','correct'].includes(s);
-      }
+      if (typeof c === 'number')  return c > 0;
+      if (typeof c === 'string')  return ['true','t','1','w','win','correct','W'].includes(c.toLowerCase());
       return false;
     };
+    const showError = m => { $err.textContent = m instanceof Error ? (m.stack || m.message) : String(m); $err.classList.remove('hidden'); console.error(m); };
+
+    const app = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    try { await signInAnonymously(auth); } catch(e) { console.warn('anon auth failed:', e.message); }
 
     function render(rows){
       $tbody.innerHTML = '';
       if (!rows.length){ $tbody.innerHTML = '<tr><td colspan="4">No data</td></tr>'; return; }
-      rows.forEach((r, i)=>{
+      rows.forEach((r,i)=>{
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td class="rank">${i+1}</td>
@@ -130,7 +116,7 @@
       });
     }
 
-    async function computeFromPicks(){
+    async function computeOverall(){
       $refreshBtn.disabled = true; $refreshBtn.textContent = 'Recalculating…';
       try {
         const byUser = new Map();
@@ -142,39 +128,40 @@
           agg.losses += toNum(losses);
         };
 
-        const weeksSnap = await getDocs(collectionGroup(db, 'weeks'));
+        const weeksSnap = await getDocs(collectionGroup(db, "weeks"));
+        let used = "collectionGroup(weeks) totals";
 
-        // For each week doc, read its picks subcollection and sum
-        await Promise.all(weeksSnap.docs.map(async (wDoc) => {
-          const parent = wDoc.ref.parent;              // …/picks/{uid}/weeks
-          const uid = parent?.parent?.id || 'unknown';
-          const d = wDoc.data() || {};
-          const nameOnWeek = pick(d, ['userName','name','displayName','player','owner']);
+        for (const wDoc of weeksSnap.docs){
+          const weekData = wDoc.data() || {};
+          const weeksColl = wDoc.ref.parent; // /picks/{uid}/weeks
+          const uid = weeksColl?.parent?.id || 'unknown';
 
-          try {
-            const picksSnap = await getDocs(collection(wDoc.ref, 'picks'));
-            let wins = 0, losses = 0;
-            picksSnap.forEach(p => { isCorrect(p.data()) ? wins++ : losses++; });
-            add(uid, nameOnWeek, wins, losses);
-          } catch (e) {
-            console.warn('picks read failed for uid', uid, 'week', wDoc.id, e);
+          // prefer totals on week doc if present
+          let wins = toNum(weekData.wins);
+          let losses = toNum(weekData.losses);
+
+          // fallback: if not present and a picks subcollection exists, count correct/incorrect
+          if (!wins && !losses){
+            try {
+              const picksSnap = await getDocs(collection(wDoc.ref, 'picks'));
+              if (picksSnap.size){
+                let w=0,l=0;
+                picksSnap.forEach(p=>{ isCorrect(p.data()) ? w++ : l++; });
+                wins = w; losses = l;
+                used = "collectionGroup(weeks) → picks (fallback)";
+              }
+            } catch {}
           }
-        }));
 
-        if (!byUser.size) {
-          $sourceLabel.textContent = 'No data found (no picks)';
-          $tbody.innerHTML = `<tr><td colspan="4">No picks docs were found under any week. Ensure picks are stored in /picks/{uid}/weeks/{weekId}/picks/* with a field like <code>correct: true/false</code>.</td></tr>`;
-          return;
+          add(uid, weekData.userName || weekData.name || weekData.displayName, wins, losses);
         }
 
-        // Enrich names from /publicUsers when missing
         const results = Array.from(byUser.values());
-        await Promise.all(results.map(async (r) => {
-          if (!r.name) {
-            try {
-              const u = await getDoc(doc(db, 'publicUsers', r.userId));
-              if (u.exists()) r.name = u.data().displayName || r.userId;
-            } catch {}
+
+        // enrich names from /publicUsers when missing
+        await Promise.all(results.map(async r=>{
+          if (!r.name){
+            try{ const u = await getDoc(doc(db,'publicUsers', r.userId)); if (u.exists()) r.name = u.data().displayName || r.userId; }catch{}
           }
         }));
 
@@ -182,14 +169,14 @@
           .map(r => ({ ...r, wins: toNum(r.wins), losses: toNum(r.losses) }))
           .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
 
-        $sourceLabel.textContent = 'collectionGroup(weeks) → picks (computed wins/losses)';
+        $sourceLabel.textContent = used;
         render(rows);
       } catch (e) { showError(e); }
       finally { $refreshBtn.disabled = false; $refreshBtn.textContent = 'Recalculate Now'; }
     }
 
-    (async ()=>{ await computeFromPicks(); })();
-    $refreshBtn.addEventListener('click', computeFromPicks);
+    (async ()=>{ await computeOverall(); })();
+    $refreshBtn.addEventListener('click', computeOverall);
   </script>
 </body>
 </html>
