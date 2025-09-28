@@ -16,6 +16,7 @@
   .match{padding:10px;border:1px dashed var(--border);border-radius:10px}
   .team{padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;text-align:center}
   .team.winner{outline:2px solid var(--accent)}
+  .team.result{outline:2px solid #22c55e}
   .bar{display:flex;justify-content:space-between;align-items:center}
   .muted{color:var(--muted)}
   .danger{color:var(--bad)}
@@ -25,6 +26,8 @@
   h2.day{margin:16px 0 8px}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
   .toast.show{opacity:1}
+  .badge{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:2px 6px;background:var(--card);color:var(--fg);cursor:pointer}
+  .admin-chip{font-size:11px;opacity:.85}
 </style>
 </head>
 <body>
@@ -122,7 +125,7 @@
   const db = getFirestore(app);
 
   // --- Admin UID(s) ---
-  window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
+  window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // <— your admin account
 
   // --- Helpers ---
   const el = s => document.querySelector(s);
@@ -147,8 +150,8 @@
 
     if (!user){
       el("#auth").style.display="block";
-      el("#app").style.display="none";
-      el("#userBox").innerHTML="";
+      el("#app").style.display ="none";
+      el("#userBox").innerHTML = "";
       return;
     }
 
@@ -198,9 +201,8 @@
       await setDoc(lockRef, { locked: e.target.checked }, { merge:true });
     };
 
-    // Games
+    // Games (ordered by createdAt; UI sorts by kickoffTs)
     const gamesCol = collection(db, "weeks", state.weekId, "games");
-    // We still order by createdAt for deterministic stream; UI will sort by kickoffTs below
     unsubGames = onSnapshot(query(gamesCol, orderBy("createdAt","asc")), snap => {
       state.games = []; snap.forEach(d => state.games.push({ id:d.id, ...d.data() }));
       el("#noGames").style.display = state.games.length ? "none" : "";
@@ -214,7 +216,7 @@
       renderGames();
     }, e => console.error("picks listener", e));
 
-    // Admin UI wiring
+    // Admin controls
     el("#addGameBtn").onclick = () => {
       const p = el("#adminAddPanel");
       p.style.display = (p.style.display==="none" || !p.style.display) ? "" : "none";
@@ -223,63 +225,95 @@
     el("#clearGamesBtn").onclick = clearGames;
   }
 
-  // --- Rendering (group by day, sort by kickoffTs) ---
+  // --- Rendering (group by day, sort by kickoffTs; tolerant to variations) ---
   function renderGames(){
     const list = el("#gameList"); list.innerHTML="";
 
     const orderDays = ["Thursday","Friday","Saturday","Sunday","Monday"];
-    const groups = Object.fromEntries([...orderDays, "Unknown"].map(d => [d, []]));
-
-    (state.games||[]).forEach(g => {
-      const day = g.day || "Unknown";
-      (groups[day] ?? groups.Unknown).push(g);
-    });
-
-    const sortByKick = (a,b) => {
-      const at = (typeof a.kickoffTs === "number") ? a.kickoffTs : Number.MAX_SAFE_INTEGER;
-      const bt = (typeof b.kickoffTs === "number") ? b.kickoffTs : Number.MAX_SAFE_INTEGER;
-      if (at !== bt) return at - bt;
-      const ac = a.createdAt||0, bc = b.createdAt||0;
-      return ac - bc;
+    const mapDay = d => {
+      const x = String(d||"").trim().toLowerCase();
+      const m = { thursday:"Thursday", friday:"Friday", saturday:"Saturday", sunday:"Sunday", monday:"Monday" };
+      return m[x] || "Other";
     };
-    const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
 
-    const rowFor = (g) => {
+    const groups = Object.fromEntries([...orderDays, "Other"].map(d => [d, []]));
+    (state.games||[]).forEach(g => { (groups[mapDay(g.day)]||groups.Other).push(g); });
+
+    const readKick = g => {
+      if (typeof g.kickoffTs === "number") return g.kickoffTs;
+      if (g.kickoff){ const t = Date.parse(g.kickoff); return Number.isFinite(t) ? t : null; }
+      return null;
+    };
+    const sortByKick = (a,b) => {
+      const at=readKick(a), bt=readKick(b);
+      if (at!=null && bt!=null && at!==bt) return at-bt;
+      if (at!=null && bt==null) return -1; if (at==null && bt!=null) return 1;
+      const ac=a.createdAt||0, bc=b.createdAt||0; return ac-bc;
+    };
+    const fmt = ms => new Date(ms).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+
+    const rowFor = g => {
       const row  = document.createElement("div"); row.className="match grid";
       const home = document.createElement("button"); home.className="team"; home.textContent=g.home;
-      const vs   = document.createElement("div"); vs.style.textAlign="center";
+      const vs   = document.createElement("div");   vs.style.textAlign="center";
       const away = document.createElement("button"); away.className="team"; away.textContent=g.away;
 
-      if (typeof g.kickoffTs === "number") vs.innerHTML = `<span class="muted">vs<br><small>${fmtTime(g.kickoffTs)}</small></span>`;
-      else vs.innerHTML = `<span class="muted">vs</span>`;
+      const t = readKick(g);
+      vs.innerHTML = t ? `<span class="muted">vs<br><small>${fmt(t)}</small></span>` : `<span class="muted">vs</span>`;
 
-      if (state.picks[g.id]==="home") home.classList.add("winner");
-      if (state.picks[g.id]==="away") away.classList.add("winner");
+      // user's pick highlight
+      if ((state.picks||{})[g.id]==="home") home.classList.add("winner");
+      if ((state.picks||{})[g.id]==="away") away.classList.add("winner");
 
+      // game result highlight (admin-set)
+      if (g.winner === "home") home.classList.add("result");
+      if (g.winner === "away") away.classList.add("result");
+
+      // lock picks for non-admin when finalized
       if (state.lock && !state.isAdmin){ home.classList.add("disabled"); away.classList.add("disabled"); }
 
-      home.onclick = () => choose(g.id,"home");
-      away.onclick = () => choose(g.id,"away");
+      home.onclick = () => choose(g.id, "home");
+      away.onclick = () => choose(g.id, "away");
+
+      // Admin winner controls
+      if (state.isAdmin){
+        const adminRow = document.createElement("div");
+        adminRow.className = "muted admin-chip";
+        adminRow.style.marginTop = "6px";
+        adminRow.innerHTML = `
+          <button class="badge" data-act="win-home">Set Home as Winner</button>
+          <button class="badge" data-act="win-away">Set Away as Winner</button>
+          <button class="badge" data-act="clear">Clear</button>
+        `;
+        vs.appendChild(adminRow);
+        adminRow.addEventListener("click", (e) => {
+          const btn = e.target.closest("button"); if (!btn) return;
+          const act = btn.getAttribute("data-act");
+          if (act === "win-home")  setWinner(g.id, "home");
+          if (act === "win-away")  setWinner(g.id, "away");
+          if (act === "clear")     setWinner(g.id, null);
+        });
+      }
 
       row.appendChild(home); row.appendChild(vs); row.appendChild(away);
       return row;
     };
 
     let any=false;
-    for (const day of orderDays){
-      const games = groups[day];
-      if (!games.length) continue;
-      games.sort(sortByKick);
-      const h = document.createElement("h2"); h.className="day"; h.textContent = day;
+    for (const d of orderDays){
+      const arr = groups[d];
+      if (!arr.length) continue;
+      arr.sort(sortByKick);
+      const h = document.createElement("h2"); h.className="day"; h.textContent = d;
       list.appendChild(h);
-      games.forEach(g => list.appendChild(rowFor(g)));
+      arr.forEach(g => list.appendChild(rowFor(g)));
       any = true;
     }
-    if (groups.Unknown.length){
-      groups.Unknown.sort(sortByKick);
+    if (groups.Other.length){
+      groups.Other.sort(sortByKick);
       const h = document.createElement("h2"); h.className="day"; h.textContent = "Other";
       list.appendChild(h);
-      groups.Unknown.forEach(g => list.appendChild(rowFor(g)));
+      groups.Other.forEach(g => list.appendChild(rowFor(g)));
       any = true;
     }
 
@@ -296,6 +330,13 @@
     renderGames();
   }
 
+  async function setWinner(gameId, side /* "home" | "away" | null */){
+    if (!state.isAdmin) return;
+    const ref = doc(db, "weeks", state.weekId, "games", gameId);
+    await setDoc(ref, { winner: side ?? null }, { merge:true });
+    toast(side ? `Winner set: ${side}` : "Winner cleared");
+  }
+
   async function saveGame(){
     if (!state.isAdmin) return;
     const day  = (el("#gameDay")?.value || "Sunday").trim();
@@ -303,13 +344,10 @@
     const away = el("#awayTeam").value.trim();
     const raw  = el("#kickoff")?.value || ""; // yyyy-mm-ddThh:mm
     const kickoffTs = raw ? Date.parse(raw) : null;
-
     if (!home || !away) return alert("Enter both team names.");
-
     await addDoc(collection(db, "weeks", state.weekId, "games"), {
       day, home, away, createdAt: Date.now(), ...(kickoffTs ? { kickoffTs } : {})
     });
-
     el("#homeTeam").value=""; el("#awayTeam").value=""; if (el("#kickoff")) el("#kickoff").value="";
     toast("Game added");
   }
@@ -323,7 +361,7 @@
     toast("Cleared " + n + " games");
   }
 
-  // --- Seeder that stores kickoffTs from ISO string (kickoff) ---
+  // --- Seeder: accepts {day, home, away, kickoff:"ISO"} or {kickoffTs:number} ---
   async function seedWeek1(items){
     if (!state.isAdmin){ console.warn("Admin only"); return; }
     const col = collection(db, "weeks", state.weekId, "games");
@@ -340,11 +378,8 @@
   }
 
   // --- Expose helpers for console ---
-  window.state = state;   // expose for console/debug  
   window.appState = state;
-  window.fx = { seedWeek1, clearGames, addDoc, collection };
-
-  // Handy debug
+  window.fx = { seedWeek1, clearGames, addDoc, collection, setWinner };
   window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
 </script>
 </body>
