@@ -31,7 +31,7 @@
 <body>
   <div class="wrap">
     <h1>Overall Standings</h1>
-    <div class="meta">Option A: week docs hold totals. We read every <code>weeks</code> doc via <code>collectionGroup('weeks')</code> and sum per-user using <strong>wins</strong>/<strong>losses</strong>/<strong>points</strong> (points defaults to wins when missing).</div>
+    <div class="meta">Totals across all weeks. Each user’s weekly doc stores **wins**/**losses**; this page sums them across all weeks and ranks by wins (ties by fewer losses).</div>
 
     <div class="card">
       <div class="row">
@@ -48,9 +48,7 @@
           <tr>
             <th class="rank">Rank</th>
             <th>Player</th>
-            <th class="num">Correct</th>
-            <th class="num">Points</th>
-            <th class="num">Weeks</th>
+            <th class=\"num\">Wins<\/th>\n            <th class=\"num\">Losses<\/th>
           </tr>
         </thead>
         <tbody id="tbody">
@@ -117,27 +115,24 @@
         tr.innerHTML = `
           <td class="rank">${i+1}</td>
           <td>${escapeHtml(r.name ?? r.userName ?? r.email ?? r.userId ?? 'Unknown')}</td>
-          <td class="num">${r.correct ?? 0}</td>
-          <td class="num">${r.points ?? r.correct ?? 0}</td>
-          <td class="num">${r.weeks ?? '-'}</td>`;
+          <td class="num">${r.wins ?? 0}</td>
+          <td class="num">${r.losses ?? 0}</td>`;
         $tbody.appendChild(tr);
       });
     }
 
-    async function computeFromWeekTotals(){
-      $refreshBtn.disabled = true; $refreshBtn.textContent = 'Recalculating…';
+    async function computeFromWeekTotalsontent = 'Recalculating…';
       try {
         const byUser = new Map();
-        const add = (uid, name, email, week, wins, losses, points) => {
-          if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name, email, correct: 0, points: 0, _weeks: new Set() });
+        const add = (uid, name, email, week, wins, losses) => {
+          if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name, email, wins: 0, losses: 0, _weeks: new Set() });
           const agg = byUser.get(uid);
           if (name && !agg.name) agg.name = name;
           if (email && !agg.email) agg.email = email;
           const w  = toNum(wins);
           const l  = toNum(losses);
-          const pt = toNum(points);
-          agg.correct += w;           // correct = wins
-          agg.points  += (pt || w);   // points default to wins if not provided
+          agg.wins   += w;
+          agg.losses += l;
           if (week != null) agg._weeks.add(String(week));
         };
 
@@ -154,9 +149,8 @@
           const email  = pick(d, ['email']);
           const wins   = pick(d, ['wins','win','correct','correctcount','correctpicks','w']);
           const losses = pick(d, ['losses','loss','incorrect','incorrectcount','l']);
-          const points = pick(d, ['points','pts','total','totalpoints','score']);
 
-          add(uid, name, email, weekId, wins, losses, points);
+          add(uid, name, email, weekId, wins, losses);
         }
 
         if (!byUser.size) {
@@ -175,10 +169,10 @@
         }
 
         const rows = results
-          .map(r => ({ ...r, points: toNum(r.points), correct: toNum(r.correct) }))
-          .sort((a,b)=> (b.points - a.points) || (b.correct - a.correct) || String(a.name||a.email||a.userId).localeCompare(String(b.name||b.email||b.userId)));
+          .map(r => ({ ...r, wins: toNum(r.wins), losses: toNum(r.losses) }))
+          .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.email||a.userId).localeCompare(String(b.name||b.email||b.userId)));
 
-        $sourceLabel.textContent = used + ' (computed)';
+        $sourceLabel.textContent = used + ' (computed: wins/losses)';
         render(rows);
       } catch (e) { showError(e); }
       finally { $refreshBtn.disabled = false; $refreshBtn.textContent = 'Recalculate Now'; }
