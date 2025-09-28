@@ -1,31 +1,52 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>NFL Picks – Overall Standings</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NFL Picks — Overall Standings</title>
   <style>
-    body { background:#0b1220; color:#e6edf3; font-family: system-ui, sans-serif; }
-    .wrap { max-width: 800px; margin: 2rem auto; }
-    .card { background:#111a2f; border:1px solid #1f2937; border-radius:12px; padding:16px; }
-    table { width:100%; border-collapse: collapse; margin-top:1rem; }
-    th,td { padding:8px; border-bottom:1px solid #1f2937; }
-    th { text-align:left; }
+    :root { --card:#0f172a; --line:#1f2937; --bg:#0b1220; --fg:#e6edf3; }
+    html,body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:980px;margin:32px auto;padding:0 16px}
+    h1{margin:0 0 8px}
+    .sub{opacity:.85;margin:0 0 16px;font-size:14px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
+    .pill{display:inline-block;background:#111827;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:12px;opacity:.9}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:10px 12px;border-bottom:1px solid var(--line)}
+    th{opacity:.8;text-transform:uppercase;font-size:12px;letter-spacing:.06em;text-align:left}
+    .num{font-variant-numeric:tabular-nums;text-align:right}
+    tbody tr:hover{background:#0b132a}
+    .muted{opacity:.75;font-size:12px;margin-top:8px}
+    .err{margin-top:10px;background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px;border-radius:10px;white-space:pre-wrap}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Overall Standings</h1>
-    <p>Totals across <b>all weeks</b>. Updates live as admins mark wins/losses.</p>
+    <p class="sub">Totals across <b>all weeks</b>. Updates live as admins mark wins/losses.</p>
+
     <div class="card">
+      <div><span class="pill" id="build">BUILD: …</span></div>
+
       <table id="standings">
         <thead>
-          <tr><th>Rank</th><th>Player</th><th>Wins</th><th>Losses</th></tr>
+          <tr>
+            <th style="width:64px">Rank</th>
+            <th>Player</th>
+            <th class="num" style="width:120px">Wins</th>
+            <th class="num" style="width:120px">Losses</th>
+          </tr>
         </thead>
         <tbody></tbody>
       </table>
+
+      <div class="muted">Source: <code>collectionGroup('picks')</code> + name lookup from <code>/publicUsers/{uid}</code>.</div>
+      <div id="err" class="err" style="display:none"></div>
     </div>
   </div>
-  
+
+  <!-- Your Firebase config -->
   <script>
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
@@ -36,43 +57,109 @@
       appId: "1:802058909501:web:bb935c188891934de07754",
       measurementId: "G-MSJHYZ4VG2"
     };
+    document.addEventListener('DOMContentLoaded', () => {
+      const b = document.getElementById('build');
+      b.textContent = `BUILD: overall-${new Date().toISOString()}`;
+    });
   </script>
 
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-    
-    const app = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
+    import {
+      getFirestore, collectionGroup, onSnapshot, doc, getDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    // --- init ---
+    const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
     const auth = getAuth(app);
-    const db = getFirestore(app);
-    
-    // Sign in anonymously so reads work
-    await signInAnonymously(auth);
+    const db   = getFirestore(app);
+    try { await signInAnonymously(auth); } catch(e){ console.warn("anon auth failed:", e.message); }
+    // expose for console debugging if you want
+    window.auth = auth;
 
-    const tbody = document.querySelector("#standings tbody");
+    // --- dom ---
+    const tbody   = document.querySelector("#standings tbody");
+    const $err    = document.getElementById('err');
+    const showErr = (m)=>{ $err.style.display='block'; $err.textContent = m instanceof Error ? (m.stack||m.message) : String(m); };
 
-    // Map uid -> { name, wins, losses }
-    const stats = {};
+    const esc = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    const toBoolCorrect = (val) => {
+      const c = val;
+      if (typeof c === 'boolean') return c;
+      if (typeof c === 'number') return c > 0;
+      if (typeof c === 'string') return ['true','t','1','w','win','correct','W'].includes(c.toLowerCase());
+      return false;
+    };
+
+    // uid -> { userId, name?, wins, losses }
+    let stats = {};
 
     function render() {
       const rows = Object.values(stats)
-        .sort((a,b)=> b.wins-a.wins || a.losses-b.losses || a.name.localeCompare(b.name))
-        .map((r,i)=> `<tr><td>${i+1}</td><td>${r.name}</td><td>${r.wins}</td><td>${r.losses}</td></tr>`)
-        .join("");
-      tbody.innerHTML = rows || `<tr><td colspan=4>No data</td></tr>`;
+        .map(r => ({...r}))
+        .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4">No data</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map((r,i)=>`
+        <tr>
+          <td>${i+1}</td>
+          <td>${esc(r.name ?? r.userName ?? r.displayName ?? r.userId ?? 'Unknown')}</td>
+          <td class="num">${r.wins}</td>
+          <td class="num">${r.losses}</td>
+        </tr>
+      `).join("");
     }
 
-    // Watch all picks across all weeks
-    onSnapshot(collectionGroup(db, "picks"), snap=>{
-      snap.forEach(doc=>{
-        const d = doc.data();
-        const uid = d.userId || doc.ref.parent.parent.parent.id; // picks -> week -> uid
-        if (!stats[uid]) stats[uid] = { name: d.userName || uid, wins:0, losses:0 };
-        if (d.correct === true) stats[uid].wins++;
-        else if (d.correct === false) stats[uid].losses++;
-      });
-      render();
+    async function enrichNames(missingUids){
+      await Promise.all(missingUids.map(async uid=>{
+        try{
+          const snap = await getDoc(doc(db, "publicUsers", uid));
+          if (snap.exists()) {
+            const n = snap.data().displayName || uid;
+            if (stats[uid]) stats[uid].name = n;
+          }
+        }catch{}
+      }));
+    }
+
+    // Live listener across ALL picks (per-game docs)
+    onSnapshot(collectionGroup(db, "picks"), async (snap)=>{
+      try {
+        // Rebuild fresh each time for correctness/simplicity
+        const next = Object.create(null);
+
+        snap.forEach(docSnap=>{
+          const d = docSnap.data() || {};
+          // Path: picks/{uid}/weeks/{weekId}/picks/{gameId}
+          const weekRef = docSnap.ref.parent.parent;           // .../weeks/{weekId}
+          const uid     = weekRef?.parent?.id;                 // .../picks/{uid}
+          if (!uid) return;
+
+          if (!next[uid]) next[uid] = { userId: uid, name: d.userName, wins: 0, losses: 0 };
+
+          const correct = toBoolCorrect(d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result);
+          if (correct) next[uid].wins++; else next[uid].losses++;
+          // prefer a human name if present on pick docs
+          if (!next[uid].name && d.userName) next[uid].name = d.userName;
+        });
+
+        stats = next;
+
+        // Enrich missing names from /publicUsers
+        const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
+        if (missing.length) await enrichNames(missing);
+
+        render();
+      } catch (e) {
+        showErr(e);
+      }
+    }, (err) => {
+      showErr(err);
     });
   </script>
 </body>
