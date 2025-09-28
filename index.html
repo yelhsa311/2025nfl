@@ -528,6 +528,14 @@ function isWriteLocked(){
   window.fx = { seedWeek1, clearGames, addDoc, collection, setWinner, computeWeekStandings, publishWeekStandings };
   window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
 
+  // Make Firestore helpers visible to the console
+  window.db = db;
+  window.doc = doc;
+  window.collection = collection;
+  window.collectionGroup = collectionGroup;
+  window.getDoc = getDoc;
+  window.getDocs = getDocs;
+
 </script>
 </body>
 </html>
