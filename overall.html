@@ -13,10 +13,8 @@
     .sub{opacity:.85;margin:0 0 12px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
     .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    .right{margin-left:auto}
-    a.button,button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:12px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+    a.button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:12px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
     a.button:visited{color:#fff}
-    button:disabled{opacity:.6;cursor:progress}
     .pill{display:inline-flex;gap:8px;align-items:center;background:#111827;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;opacity:.9}
     table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:10px 12px;border-bottom:1px solid var(--line)}
@@ -31,134 +29,98 @@
   <div class="wrap">
     <header>
       <h1>Overall Standings</h1>
-      <a class="button" href="./index.html" title="Back to Weeks">← Back to Weeks</a>
+      <a class="button" href="./index.html">← Back to Weeks</a>
     </header>
     <p class="sub">Totals across <b>all weeks</b>. Updates live as admins mark wins/losses.</p>
 
-    <div class="card">
+    <div id="content" class="card">
       <div class="row">
-        <span class="pill" id="build">BUILD: …</span>
-        <span class="pill" id="source">Source: …</span>
-        <span class="right pill" id="updated">Updated: —</span>
+        <span id="build" class="pill"></span>
+        <span id="source" class="pill"></span>
+        <span id="updated" class="pill right"></span>
       </div>
 
       <table id="standings">
-        <thead>
-          <tr>
-            <th style="width:72px">Rank</th>
-            <th>Player</th>
-            <th class="num" style="width:120px">Wins</th>
-            <th class="num" style="width:120px">Losses</th>
-          </tr>
-        </thead>
-        <tbody><tr><td colspan="4">Loading…</td></tr></tbody>
+        <thead><tr><th>Rank</th><th>Player</th><th class="num">Wins</th><th class="num">Losses</th></tr></thead>
+        <tbody></tbody>
       </table>
 
-      <div id="err" class="err"></div>
-      <div class="muted">Names come from the week docs or <code>/publicUsers/{uid}</code>.</div>
+      <div id="error" class="err"></div>
+      <p class="muted">Names come from the pick docs or <code>/publicUsers/{uid}</code>.</p>
     </div>
   </div>
-
-  <!-- Your Firebase config -->
-  <script>
-    window.FIREBASE_CONFIG = {
-      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
-      authDomain: "nfl-picks-b83c2.firebaseapp.com",
-      projectId: "nfl-picks-b83c2",
-      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
-      messagingSenderId: "802058909501",
-      appId: "1:802058909501:web:bb935c188891934de07754",
-      measurementId: "G-MSJHYZ4VG2"
-    };
-    document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('build').textContent = `BUILD: overall-${new Date().toISOString()}`;
-    });
-  </script>
 
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import {
-      getFirestore,
-      collectionGroup,
-      onSnapshot,
-      doc, getDoc
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { getFirestore, collectionGroup, onSnapshot, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // --- init ---
-    const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
+    // TODO: replace with your Firebase config
+    const firebaseConfig = {
+      apiKey: "YOUR-API-KEY",
+      authDomain: "YOUR.firebaseapp.com",
+      projectId: "YOUR",
+    };
+
+    const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const db   = getFirestore(app);
-    try { await signInAnonymously(auth); } catch(e){ console.warn("anon auth failed:", e.message); }
+    const db = getFirestore(app);
 
-    // --- DOM ---
-    const tbody    = document.querySelector("#standings tbody");
-    const $err     = document.getElementById('err');
-    const $source  = document.getElementById('source');
-    const $updated = document.getElementById('updated');
+    const tbody = document.querySelector("#standings tbody");
+    const $build = document.querySelector("#build");
+    const $source = document.querySelector("#source");
+    const $updated = document.querySelector("#updated");
+    const $err = document.querySelector("#error");
 
-    const esc = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-    const toNum = v => (v === true ? 1 : v === false ? 0 : Number.isFinite(Number(v)) ? Number(v) : 0);
+    $build.textContent = "BUILD: overall-" + new Date().toISOString();
+    $source.textContent = "Source: collectionGroup('weeks') totals (live)";
 
-    let stats = {};
+    // Sign in anonymously
+    signInAnonymously(auth).catch(console.error);
 
-    function render() {
-      const rows = Object.values(stats)
-        .map(r => ({...r, wins: toNum(r.wins), losses: toNum(r.losses)}))
-        .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
-
-      tbody.innerHTML = rows.length
-        ? rows.map((r,i)=>`
-          <tr>
-            <td>${i+1}</td>
-            <td>${esc(r.name ?? r.userName ?? r.displayName ?? r.userId ?? 'Unknown')}</td>
-            <td class="num">${r.wins}</td>
-            <td class="num">${r.losses}</td>
-          </tr>`).join("")
-        : `<tr><td colspan="4">No data</td></tr>`;
-
-      $updated.textContent = `Updated: ${new Date().toLocaleString()}`;
-      $source.textContent  = "Source: collectionGroup('weeks') totals (live)";
-      if ($err) $err.style.display = 'none';
+    function render(rows) {
+      tbody.innerHTML = "";
+      rows.forEach((r, i) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${i+1}</td>
+          <td>${r.name||r.uid}</td>
+          <td class="num">${r.wins}</td>
+          <td class="num">${r.losses}</td>`;
+        tbody.appendChild(tr);
+      });
     }
 
-    async function enrichNames(uids){
-      await Promise.all(uids.map(async uid=>{
-        try{
-          const snap = await getDoc(doc(db, "publicUsers", uid));
-          if (snap.exists() && stats[uid]) stats[uid].name = snap.data().displayName || uid;
-        }catch{}
-      }));
-    }
-
-    // Live totals from week docs only
-    onSnapshot(collectionGroup(db, "weeks"), async (snap)=>{
-      try{
-        const byUser = new Map();
-        for (const w of snap.docs){
-          const uid = w.ref.parent?.parent?.id;
-          if (!uid) continue;
-          const d = w.data() || {};
-          const wins = toNum(d.wins), losses = toNum(d.losses);
-
-          if (!byUser.has(uid)) byUser.set(uid, {
-            userId: uid,
-            name: d.userName || d.name || d.displayName,
-            wins: 0, losses: 0
-          });
-          const agg = byUser.get(uid);
-          agg.wins   += wins;
-          agg.losses += losses;
+    // Listen live to weeks → picks
+    onSnapshot(collectionGroup(db, "weeks"), async (snap) => {
+      try {
+        const results = {};
+        for (const w of snap.docs) {
+          const uid = w.ref.parent.parent.id;
+          const picksSnap = await getDoc(doc(db, "picks", uid, "weeks", w.id));
+          const data = picksSnap.data();
+          if (!data) continue;
+          results[uid] ??= { uid, wins: 0, losses: 0 };
+          results[uid].wins += data.wins || 0;
+          results[uid].losses += data.losses || 0;
         }
 
-        stats = Object.fromEntries([...byUser.entries()].map(([uid, v]) => [uid, v]));
-        const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
-        if (missing.length) await enrichNames(missing);
+        // Enrich with names from /publicUsers/{uid}
+        await Promise.all(Object.values(results).map(async r => {
+          const u = await getDoc(doc(db, "publicUsers", r.uid));
+          if (u.exists()) r.name = u.data().displayName;
+        }));
 
-        render();
-      }catch(e){
-        if ($err){ $err.style.display='block'; $err.textContent = e.stack || e.message || String(e); }
+        const rows = Object.values(results)
+          .sort((a,b) => (b.wins - a.wins) || (a.losses - b.losses));
+
+        render(rows);
+        $updated.textContent = "Updated: " + new Date().toLocaleString();
+        $err.style.display = "none";
+      } catch (e) {
         console.error(e);
+        $err.textContent = "FirebaseError: " + e.message;
+        $err.style.display = "block";
       }
     });
   </script>
