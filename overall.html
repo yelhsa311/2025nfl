@@ -1,132 +1,139 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>NFL Picks — Overall Standings</title>
-  <style>
-    :root { --bg:#0b1220; --fg:#e6edf3; --card:#0f172a; --line:#1f2937; --accent:#1f6feb; }
-    html,body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
-    header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
-    h1{margin:0}
-    .sub{opacity:.85;margin:0 0 12px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
-    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-    a.button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:12px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
-    a.button:visited{color:#fff}
-    .pill{display:inline-flex;gap:8px;align-items:center;background:#111827;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;opacity:.9}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
-    th,td{padding:10px 12px;border-bottom:1px solid var(--line)}
-    th{opacity:.8;text-transform:uppercase;font-size:12px;letter-spacing:.06em;text-align:left}
-    .num{text-align:right;font-variant-numeric:tabular-nums}
-    tbody tr:hover{background:#0b132a}
-    .muted{opacity:.75;font-size:12px;margin-top:8px}
-    .err{margin-top:12px;background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px;border-radius:10px;white-space:pre-wrap;display:none}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <h1>Overall Standings</h1>
-      <a class="button" href="./index.html">← Back to Weeks</a>
-    </header>
-    <p class="sub">Totals across <b>all weeks</b>. Updates live as admins mark wins/losses.</p>
+<script type="module">
+  import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import {
+    getFirestore, collection, collectionGroup, onSnapshot,
+    getDoc, doc
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    <div id="content" class="card">
-      <div class="row">
-        <span id="build" class="pill"></span>
-        <span id="source" class="pill"></span>
-        <span id="updated" class="pill right"></span>
-      </div>
+  // Use your actual config (or window.FIREBASE_CONFIG if you already set it above)
+  const app = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG || {
+    apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+    authDomain: "nfl-picks-b83c2.firebaseapp.com",
+    projectId: "nfl-picks-b83c2",
+    storageBucket: "nfl-picks-b83c2.firebasestorage.app",
+    messagingSenderId: "802058909501",
+    appId: "1:802058909501:web:bb935c188891934de07754"
+  });
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+  try { await signInAnonymously(auth); } catch {}
 
-      <table id="standings">
-        <thead><tr><th>Rank</th><th>Player</th><th class="num">Wins</th><th class="num">Losses</th></tr></thead>
-        <tbody></tbody>
-      </table>
+  const tbody    = document.querySelector("#standings tbody");
+  const $source  = document.getElementById("source");
+  const $updated = document.getElementById("updated");
+  const $err     = document.getElementById("error");
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const toSide = v => String(v ?? "").toLowerCase().trim();     // "home" | "away"
 
-      <div id="error" class="err"></div>
-      <p class="muted">Names come from the pick docs or <code>/publicUsers/{uid}</code>.</p>
-    </div>
-  </div>
+  // Global state
+  const weekIds = new Set();                 // discovered week ids (e.g. "2025-Week-01")
+  const winnersByWeek = new Map();           // weekId -> { gameId: "home"|"away" }
+  const picksByUserWeek = new Map();         // `${uid}|${weekId}` -> { userId, userName, picks: {gameId:"home|away"} }
+  let unsubs = [];                           // to clean up listeners if needed
 
-  <script type="module">
-    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { getFirestore, collectionGroup, onSnapshot, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  function upsertUserWeek(uid, weekId, data){
+    const key = `${uid}|${weekId}`;
+    const current = picksByUserWeek.get(key) || { userId: uid, weekId, picks: {}, userName: undefined };
+    // merge picks map (we only need the {gameId: "home"|"away"} map)
+    const src = data?.picks || {};
+    current.picks = src && typeof src === 'object' ? src : {};
+    current.userName = data?.userName || data?.name || data?.displayName || current.userName;
+    picksByUserWeek.set(key, current);
+  }
 
-    // TODO: replace with your Firebase config
-    const firebaseConfig = {
-      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
-      authDomain: "nfl-picks-b83c2.firebaseapp.com",
-      projectId: "nfl-picks-b83c2",
-      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
-      messagingSenderId: "802058909501",
-      appId: "1:802058909501:web:bb935c188891934de07754",
-      measurementId: "G-MSJHYZ4VG2"
-    };
-
-    const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    const tbody = document.querySelector("#standings tbody");
-    const $build = document.querySelector("#build");
-    const $source = document.querySelector("#source");
-    const $updated = document.querySelector("#updated");
-    const $err = document.querySelector("#error");
-
-    $build.textContent = "BUILD: overall-" + new Date().toISOString();
-    $source.textContent = "Source: collectionGroup('weeks') totals (live)";
-
-    // Sign in anonymously
-    signInAnonymously(auth).catch(console.error);
-
-    function render(rows) {
-      tbody.innerHTML = "";
-      rows.forEach((r, i) => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${i+1}</td>
-          <td>${r.name||r.uid}</td>
-          <td class="num">${r.wins}</td>
-          <td class="num">${r.losses}</td>`;
-        tbody.appendChild(tr);
-      });
-    }
-
-    // Listen live to weeks → picks
-    onSnapshot(collectionGroup(db, "weeks"), async (snap) => {
+  async function enrichDisplayNames(perUser){
+    const missing = Object.values(perUser).filter(r => !r.name).map(r => r.userId);
+    await Promise.all(missing.map(async uid=>{
       try {
-        const results = {};
-        for (const w of snap.docs) {
-          const uid = w.ref.parent.parent.id;
-          const picksSnap = await getDoc(doc(db, "picks", uid, "weeks", w.id));
-          const data = picksSnap.data();
-          if (!data) continue;
-          results[uid] ??= { uid, wins: 0, losses: 0 };
-          results[uid].wins += data.wins || 0;
-          results[uid].losses += data.losses || 0;
-        }
+        const s = await getDoc(doc(db, "publicUsers", uid));
+        if (s.exists()) perUser[uid].name = s.data().displayName || uid;
+      } catch {}
+    }));
+  }
 
-        // Enrich with names from /publicUsers/{uid}
-        await Promise.all(Object.values(results).map(async r => {
-          const u = await getDoc(doc(db, "publicUsers", r.uid));
-          if (u.exists()) r.name = u.data().displayName;
-        }));
+  function computeTotals(){
+    // Aggregate across all weeks using winnersByWeek + picksByUserWeek
+    const perUser = {};
+    for (const { userId, weekId, picks, userName } of picksByUserWeek.values()){
+      const weekWinners = winnersByWeek.get(weekId) || {};
+      if (!perUser[userId]) perUser[userId] = { userId, name: userName, wins: 0, losses: 0 };
 
-        const rows = Object.values(results)
-          .sort((a,b) => (b.wins - a.wins) || (a.losses - b.losses));
-
-        render(rows);
-        $updated.textContent = "Updated: " + new Date().toLocaleString();
-        $err.style.display = "none";
-      } catch (e) {
-        console.error(e);
-        $err.textContent = "FirebaseError: " + e.message;
-        $err.style.display = "block";
+      for (const [gameId, pickVal] of Object.entries(picks || {})){
+        const pick = toSide(pickVal);
+        const winr = toSide(weekWinners[gameId]);
+        if (!pick || !winr) continue;
+        if (pick === winr) perUser[userId].wins++;
+        else               perUser[userId].losses++;
       }
-    });
-  </script>
-</body>
-</html>
+    }
+    return perUser;
+  }
+
+  async function renderNow(){
+    try {
+      const perUser = computeTotals();
+      await enrichDisplayNames(perUser);
+
+      const rows = Object.values(perUser)
+        .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
+
+      tbody.innerHTML = rows.length
+        ? rows.map((r,i)=>`
+          <tr>
+            <td>${i+1}</td>
+            <td>${esc(r.name ?? r.userId)}</td>
+            <td class="num">${r.wins}</td>
+            <td class="num">${r.losses}</td>
+          </tr>`).join("")
+        : `<tr><td colspan="4">No data</td></tr>`;
+
+      $updated.textContent = "Updated: " + new Date().toLocaleString();
+      $source.textContent  = "Source: winners(/weeks/*/games) + picks maps(/picks/*/weeks/*) (live)";
+      if ($err) $err.style.display = "none";
+    } catch(e){
+      console.error(e);
+      if ($err){ $err.style.display='block'; $err.textContent = e.message; }
+    }
+  }
+
+  // 1) Listen to the root /weeks collection to discover weekIds, and for each, listen to /games
+  unsubs.push(
+    onSnapshot(collection(db, "weeks"), (weeksSnap)=>{
+      weeksSnap.forEach(weekDoc=>{
+        const wId = weekDoc.id;
+        if (weekIds.has(wId)) return;
+        weekIds.add(wId);
+
+        // winners for this week
+        unsubs.push(onSnapshot(collection(db, "weeks", wId, "games"), (gamesSnap)=>{
+          const winners = {};
+          gamesSnap.forEach(g=>{
+            const d = g.data() || {};
+            winners[g.id] = toSide(d.winner ?? d.result ?? d.w ?? d.W ?? "");
+          });
+          winnersByWeek.set(wId, winners);
+          renderNow();
+        }));
+      });
+    })
+  );
+
+  // 2) Listen to all week docs under /picks/*/weeks/* (we only need id + picks map)
+  //    We filter in code to week docs (id === some week in weekIds) and read the 'picks' map.
+  unsubs.push(
+    onSnapshot(collectionGroup(db, "weeks"), (snap)=>{
+      snap.forEach(w=>{
+        const weekId = w.id;
+        // Only consider user-week docs under /picks/{uid}/weeks/{weekId}
+        const maybeUser = w.ref.parent?.parent; // /picks/{uid}
+        if (!maybeUser || maybeUser.parent?.id !== "picks") return;
+        const uid = maybeUser.id;
+        upsertUserWeek(uid, weekId, w.data());
+      });
+      renderNow();
+    })
+  );
+
+  window.addEventListener('beforeunload', ()=>{ try{ unsubs.forEach(u=>u&&u()); }catch{} });
+</script>
