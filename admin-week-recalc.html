@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NFL Picks – Admin Week Recalc</title>
+  <style>
+    html,body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b1220;color:#e6edf3}
+    .wrap{max-width:920px;margin:32px auto;padding:0 16px}
+    .card{background:#0f172a;border:1px solid #1f2937;border-radius:16px;padding:18px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    label{opacity:.9}
+    input{font:inherit;border:1px solid #233043;background:#0b1326;color:#e6edf3;border-radius:10px;padding:8px 10px}
+    input[type=text]{min-width:220px}
+    button{font:inherit;background:#1f6feb;color:#fff;border:0;padding:10px 14px;border-radius:12px;cursor:pointer;font-weight:600}
+    button:disabled{opacity:.6;cursor:progress}
+    .log{white-space:pre-wrap;background:#0b1326;border:1px solid #233043;border-radius:12px;padding:10px;height:260px;overflow:auto;margin-top:14px}
+    .ok{color:#7ee787}.err{color:#ff7b72}.muted{opacity:.75}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Admin – Auto Recalculate Week Totals</h1>
+    <p class="muted">
+      Watches <code>/weeks/{weekId}/games/*</code> and writes <strong>wins</strong>/<strong>losses</strong> to each
+      <code>/picks/{uid}/weeks/{weekId}</code> doc. Works with your current <code>picks</code> <em>map field</em>
+      (e.g., <code>{ gameId: "home"|"away" }</code>) and also with a <code>picks</code> <em>subcollection</em>
+      containing per-game docs with a result field (e.g., <code>correct: true/false</code>).
+    </p>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <label>Admin UID</label>
+        <input id="adminUid" type="text" value="j8D0AzIAgmTHSaDcBHwQbpMT9Is1" />
+        <label>Week ID</label>
+        <input id="weekId" type="text" value="2025-Week-01" />
+        <button id="btnSignIn">Sign in (Google)</button>
+        <button id="btnRun">Recalc Now</button>
+        <button id="btnWatch">Start Watching</button>
+        <span id="who" class="muted"></span>
+      </div>
+
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+  <!-- Firebase config (your real project values) -->
+  <script>
+    window.FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+      authDomain: "nfl-picks-b83c2.firebaseapp.com",
+      projectId: "nfl-picks-b83c2",
+      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
+      messagingSenderId: "802058909501",
+      appId: "1:802058909501:web:bb935c188891934de07754",
+      measurementId: "G-MSJHYZ4VG2"
+    };
+  </script>
+
+  <script type="module">
+    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      getFirestore, collection, collectionGroup, query, where,
+      getDoc, getDocs, onSnapshot, doc, updateDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    // --- init ---
+    const app = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // --- dom helpers ---
+    const $adminUid = document.getElementById('adminUid');
+    const $weekId   = document.getElementById('weekId');
+    const $btnSign  = document.getElementById('btnSignIn');
+    const $btnRun   = document.getElementById('btnRun');
+    const $btnWatch = document.getElementById('btnWatch');
+    const $who      = document.getElementById('who');
+    const $log      = document.getElementById('log');
+    const log = (m, cls='') => { const p=document.createElement('div'); p.textContent=m; if(cls) p.className=cls; $log.appendChild(p); $log.scrollTop=$log.scrollHeight; };
+
+    onAuthStateChanged(auth, u => { $who.textContent = u ? `Signed in as ${u.email||u.uid}` : '(not signed in)'; });
+
+    async function ensureAdmin() {
+      if (!auth.currentUser) await signInWithPopup(auth, new GoogleAuthProvider());
+      const want = $adminUid.value.trim();
+      if (auth.currentUser?.uid !== want) throw new Error(`Not an admin (expected ${want}, got ${auth.currentUser?.uid})`);
+      return auth.currentUser.uid;
+    }
+
+    // winners under /weeks/{weekId}/games/{gameId}  { winner: "home"|"away" | ... }
+    async function getWinners(weekId){
+      const snap = await getDocs(collection(db, "weeks", weekId, "games"));
+      const winners = {};
+      snap.forEach(g=>{
+        const d = g.data() || {};
+        const raw = d.winner ?? d.result ?? d.w ?? d.W ?? "";
+        const val = String(raw).toLowerCase().trim(); // normalize
+        if (val) winners[g.id] = val;                 // expect "home"/"away"
+      });
+      return winners;
+    }
+
+    // compute from your current picks MAP on the week doc
+    function tallyFromMap(picksMap={}, winners={}){
+      let wins=0, losses=0;
+      for (const [gameId, pick] of Object.entries(picksMap)){
+        const p = String(pick||"").toLowerCase().trim();
+        const w = winners[gameId];
+        if (!w || !p) continue;
+        if (p === w) wins++; else losses++;
+      }
+      return { wins, losses };
+    }
+
+    // compute from picks SUBCOLLECTION (if you add it later)
+    function tallyFromSubcollection(picksSnap){
+      let wins=0, losses=0;
+      picksSnap.forEach(doc=>{
+        const d = doc.data() || {};
+        let c = d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result;
+        if (typeof c === 'string') c = ['true','t','1','w','win','correct','W'].includes(c.toLowerCase());
+        if (!!c) wins++; else losses++;
+      });
+      return { wins, losses };
+    }
+
+    // load all week docs for weekId (faster if you store weekId field; otherwise filter by id)
+    async function getWeekDocs(weekId){
+      // try a targeted query if week docs store weekId field
+      const q = query(collectionGroup(db, "weeks"), where("weekId", "==", weekId));
+      try {
+        const byField = await getDocs(q);
+        if (!byField.empty) return byField.docs.filter(d => (d.id === weekId || (d.data()?.weekId === weekId)));
+      } catch (_) { /* ignore (no index or no field) */ }
+
+      // fallback: scan all and match by doc id
+      const all = await getDocs(collectionGroup(db, "weeks"));
+      return all.docs.filter(d => d.id === weekId);
+    }
+
+    async function recalcWeek(weekId){
+      const admin = await ensureAdmin();
+      $btnRun.disabled = true; $btnWatch.disabled = true;
+      log(`Recalculating totals for ${weekId} as ${admin}…`);
+
+      const winners = await getWinners(weekId);
+      const weekDocs = await getWeekDocs(weekId);
+      log(`Found ${Object.keys(winners).length} winners & ${weekDocs.length} user week docs.`);
+
+      let updates = 0;
+      for (const w of weekDocs){
+        const uid = w.ref.parent?.parent?.id;
+        if (!uid) continue;
+
+        const data = w.data() || {};
+        let { wins, losses } = tallyFromMap(data.picks || {}, winners);
+
+        // optional fallback: if no map-based totals and you also have a picks subcollection
+        if (wins === 0 && losses === 0) {
+          try {
+            const { getDocs, collection } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js");
+            const sub = await getDocs(collection(w.ref, "picks"));
+            if (!sub.empty) ({ wins, losses } = tallyFromSubcollection(sub));
+          } catch {}
+        }
+
+        await updateDoc(doc(db, "picks", uid, "weeks", weekId), {
+          wins, losses, updatedAt: new Date()
+        });
+        updates++;
+        log(` • ${uid}  →  W:${wins} L:${losses}`, "ok");
+      }
+      log(`Done. Updated ${updates} docs for ${weekId}.`, "ok");
+      $btnRun.disabled = false; $btnWatch.disabled = false;
+    }
+
+    // debounce helper for watch mode
+    function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+    let unsubs = [];
+    async function startWatching(){
+      const admin = await ensureAdmin();
+      const weekId = $weekId.value.trim();
+      if (!weekId) return alert("Enter a week id");
+
+      unsubs.forEach(u=>u()); unsubs = [];
+      const { onSnapshot, collection } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js");
+      const run = debounce(()=>recalcWeek(weekId).catch(e=>log(`recalc error: ${e.message}`,'err')), 500);
+
+      const unsub = onSnapshot(collection(db, "weeks", weekId, "games"), ()=>{
+        log("Detected change in /weeks/"+weekId+"/games — scheduling recalc…");
+        run();
+      });
+      unsubs.push(unsub);
+      log(`Watching winners for ${weekId} as ${admin}.`, "ok");
+    }
+
+    // wire up buttons
+    $btnSign.addEventListener('click', async()=>{ try{ await ensureAdmin(); log("Signed in.", "ok"); }catch(e){ log(e.message, "err"); }});
+    $btnRun.addEventListener('click', async()=>{ try{ await recalcWeek($weekId.value.trim()); }catch(e){ log(e.stack||e.message, "err"); }});
+    let watching=false;
+    $btnWatch.
