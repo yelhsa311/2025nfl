@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NFL Picks — Overall Leaderboard</title>
+<style>
+  :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--accent:#6ea8ff;--border:#252a33}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:960px;margin:0 auto;padding:12px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
+  .muted{color:var(--muted)}
+  .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
+  button,input,select{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:10px;border-radius:10px}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border:1px solid var(--border);padding:8px;text-align:left}
+  th{background:#12151c}
+  .right{float:right}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row" style="justify-content:space-between">
+    <h1 style="margin:0">Overall Leaderboard</h1>
+    <div id="userBox" class="row"></div>
+  </div>
+
+  <!-- Auth (simple) -->
+  <div id="auth" class="card" style="display:none">
+    <div class="row">
+      <input id="email" type="email" placeholder="Email" />
+      <input id="pass" type="password" placeholder="Password" />
+      <button id="signInBtn">Sign in</button>
+    </div>
+    <div class="muted" style="margin-top:6px">You must be signed in to view standings.</div>
+  </div>
+
+  <div id="content" style="display:none">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <label for="seasonSelect">Season:</label>
+          <select id="seasonSelect"><option value="all">All</option></select>
+        </div>
+        <div>
+          <a href="index.html" class="pill">← Back to Picks</a>
+        </div>
+      </div>
+      <div id="overallBody"><div class="muted">Loading…</div></div>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary class="muted">Per-week breakdown (published weeks)</summary>
+        <div id="perWeek"></div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { initializeFirestore, getFirestore, collectionGroup, getDocs } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+  // --- Your Firebase config ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+    authDomain: "nfl-picks-b83c2.firebaseapp.com",
+    projectId: "nfl-picks-b83c2",
+    storageBucket: "nfl-picks-b83c2.appspot.com",
+    messagingSenderId: "802058909501",
+    appId: "1:802058909501:web:bb935c188891934de07754",
+    measurementId: "G-MSJHYZ4VG2"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  // --- UI helpers ---
+  const el = (s) => document.querySelector(s);
+  const fmtPct = (w,g) => g ? (w/g*100).toFixed(1)+"%" : "—";
+  const getSeasonFromWeekId = (weekId) => (weekId||'').split('-')[0] || 'Unknown';
+
+  // --- Auth wiring ---
+  onAuthStateChanged(auth, (user) => {
+    if (!user){
+      el('#userBox').innerHTML = '';
+      el('#auth').style.display = '';
+      el('#content').style.display = 'none';
+    } else {
+      el('#userBox').innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
+      el('#signOutBtn').onclick = async () => { try { await signOut(auth); } finally { location.reload(); } };
+      el('#auth').style.display = 'none';
+      el('#content').style.display = '';
+      loadOverall();
+    }
+  });
+
+  el('#signInBtn').onclick = async () => {
+    const email = el('#email').value.trim();
+    const pass  = el('#pass').value;
+    try{ await signInWithEmailAndPassword(auth, email, pass); } catch(e){ alert(e.message); }
+  };
+
+  // --- Data load & render ---
+  async function loadOverall(){
+    // Pull all published week scores across seasons
+    const scoresSnap = await getDocs(collectionGroup(db, 'scores'));
+
+    // Collect seasons present (by weekId like "2025-Week-01")
+    const seasonSet = new Set();
+    const rows = []; // {uid, email, weekId, wins, games}
+    scoresSnap.forEach(s => {
+      const data = s.data();
+      const path = s.ref.path.split('/');
+      const uid  = path[path.length-1];
+      const weekId = data.weekId || 'Unknown-Week';
+      const email = data.email || uid;
+      seasonSet.add(getSeasonFromWeekId(weekId));
+      rows.push({ uid, email, weekId, wins: Number(data.wins||0), games: Number(data.games||0) });
+    });
+
+    // Build season select
+    const sel = el('#seasonSelect');
+    sel.innerHTML = '<option value="all">All</option>' +
+      Array.from(seasonSet).sort().map(y => `<option value="${y}">${y}</option>`).join('');
+    sel.onchange = () => renderOverall(rows, sel.value);
+
+    renderOverall(rows, sel.value);
+  }
+
+  function renderOverall(rows, seasonFilter){
+    // Filter rows by season
+    const filtered = rows.filter(r => seasonFilter === 'all' || getSeasonFromWeekId(r.weekId) === seasonFilter);
+
+    // Aggregate per user
+    const byUser = new Map();
+    filtered.forEach(r => {
+      const prev = byUser.get(r.uid) || { email:r.email, wins:0, games:0, weeks:0 };
+      prev.wins  += r.wins;
+      prev.games += r.games;
+      prev.weeks += 1;
+      byUser.set(r.uid, prev);
+    });
+
+    const agg = Array.from(byUser.entries()).map(([uid,v])=>({ uid, ...v }));
+    agg.sort((a,b)=> (b.wins - a.wins) || (a.email||a.uid).localeCompare(b.email||b.uid));
+
+    if (!agg.length){
+      el('#overallBody').innerHTML = '<div class="muted">No published weeks yet for this selection.</div>';
+      el('#perWeek').innerHTML = '';
+      return;
+    }
+
+    const html = [
+      '<table><thead><tr><th>Rank</th><th>User</th><th>Total Wins</th><th>Games</th><th>Win %</th><th>Weeks</th></tr></thead><tbody>',
+      ...agg.map((r,i)=>`<tr><td>${i+1}</td><td>${r.email}</td><td>${r.wins}</td><td>${r.games}</td><td>${fmtPct(r.wins,r.games)}</td><td>${r.weeks}</td></tr>`),
+      '</tbody></table>'
+    ].join('');
+    el('#overallBody').innerHTML = html;
+
+    // Per-week breakdown (published weeks only)
+    // Build map: weekId -> [{email,wins,games}]
+    const per = new Map();
+    rows.filter(r => seasonFilter==='all' || getSeasonFromWeekId(r.weekId)===seasonFilter).forEach(r => {
+      const arr = per.get(r.weekId) || [];
+      arr.push(r);
+      per.set(r.weekId, arr);
+    });
+
+    const weekHtml = [];
+    Array.from(per.keys()).sort().forEach(weekId => {
+      const list = per.get(weekId).sort((a,b)=> b.wins - a.wins || (a.email||'').localeCompare(b.email||''));
+      weekHtml.push(`<h3 style="margin:10px 0 6px">${weekId}</h3>`);
+      weekHtml.push('<table><thead><tr><th>Rank</th><th>User</th><th>Wins</th><th>Games</th><th>Win %</th></tr></thead><tbody>');
+      weekHtml.push(...list.map((r,i)=>`<tr><td>${i+1}</td><td>${r.email}</td><td>${r.wins}</td><td>${r.games}</td><td>${fmtPct(r.wins,r.games)}</td></tr>`));
+      weekHtml.push('</tbody></table>');
+    });
+    el('#perWeek').innerHTML = weekHtml.join('');
+  }
+</script>
+</body>
+</html>
