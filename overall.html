@@ -24,7 +24,7 @@
     .num{text-align:right;font-variant-numeric:tabular-nums}
     tbody tr:hover{background:#0b132a}
     .muted{opacity:.75;font-size:12px;margin-top:8px}
-    .err{margin-top:12px;background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px;border-radius:10px;white-space:pre-wrap}
+    .err{margin-top:12px;background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px;border-radius:10px;white-space:pre-wrap;display:none}
   </style>
 </head>
 <body>
@@ -54,8 +54,8 @@
         <tbody><tr><td colspan="4">Loading…</td></tr></tbody>
       </table>
 
-      <div id="err" class="err" style="display:none"></div>
-      <div class="muted">Names come from the pick docs or <code>/publicUsers/{uid}</code>.</div>
+      <div id="err" class="err"></div>
+      <div class="muted">Names come from the week docs or <code>/publicUsers/{uid}</code>.</div>
     </div>
   </div>
 
@@ -82,36 +82,25 @@
       getFirestore,
       collectionGroup,
       onSnapshot,
-      doc, getDoc,
-      collection
+      doc, getDoc
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // ---------- init ----------
+    // --- init ---
     const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
     const auth = getAuth(app);
     const db   = getFirestore(app);
     try { await signInAnonymously(auth); } catch(e){ console.warn("anon auth failed:", e.message); }
 
-    // ---------- DOM ----------
+    // --- DOM ---
     const tbody    = document.querySelector("#standings tbody");
     const $err     = document.getElementById('err');
     const $source  = document.getElementById('source');
     const $updated = document.getElementById('updated');
 
-    const showErr = (m)=>{ $err.style.display='block'; $err.textContent = m instanceof Error ? (m.stack||m.message) : String(m); console.error(m); };
     const esc = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const toNum = v => (v === true ? 1 : v === false ? 0 : Number.isFinite(Number(v)) ? Number(v) : 0);
 
-    const toBoolCorrect = (v) => {
-      if (typeof v === 'boolean') return v;
-      if (typeof v === 'number')  return v > 0;
-      if (typeof v === 'string')  return ['true','t','1','w','win','correct','W'].includes(v.toLowerCase());
-      return false;
-    };
-    const toNum = (v) => (v === true ? 1 : v === false ? 0 : Number.isFinite(Number(v)) ? Number(v) : 0);
-
-    // uid -> { userId, name?, wins, losses }
     let stats = {};
-    let havePickDocs = false; // flips true if any per-game docs exist
 
     function render() {
       const rows = Object.values(stats)
@@ -129,6 +118,8 @@
         : `<tr><td colspan="4">No data</td></tr>`;
 
       $updated.textContent = `Updated: ${new Date().toLocaleString()}`;
+      $source.textContent  = "Source: collectionGroup('weeks') totals (live)";
+      if ($err) $err.style.display = 'none';
     }
 
     async function enrichNames(uids){
@@ -140,38 +131,9 @@
       }));
     }
 
-    // ---------- Source A: per-game picks subcollection (live) ----------
-    const stopA = onSnapshot(collectionGroup(db, "picks"), async (snap)=>{
-      try {
-        const next = Object.create(null);
-        snap.forEach(s=>{
-          const d = s.data() || {};
-          const weekRef = s.ref.parent?.parent;   // .../weeks/{weekId}
-          const uid = weekRef?.parent?.id;        // .../picks/{uid}
-          if (!uid) return;
-
-          if (!next[uid]) next[uid] = { userId: uid, name: d.userName, wins: 0, losses: 0 };
-          const correct = toBoolCorrect(d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result);
-          if (correct) next[uid].wins++; else next[uid].losses++;
-          if (!next[uid].name && d.userName) next[uid].name = d.userName;
-        });
-
-        havePickDocs = snap.size > 0;
-        if (havePickDocs) {
-          stats = next;
-          const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
-          if (missing.length) await enrichNames(missing);
-          $source.textContent = "Source: collectionGroup('picks') (live)";
-          render();
-        }
-      } catch (e) { showErr(e); }
-    }, (err)=> showErr(err));
-
-    // ---------- Source B: week totals fallback (live) ----------
-    const stopB = onSnapshot(collectionGroup(db, "weeks"), async (snap)=>{
-      try {
-        if (havePickDocs) return; // prefer per-game docs when present
-
+    // Live totals from week docs only
+    onSnapshot(collectionGroup(db, "weeks"), async (snap)=>{
+      try{
         const byUser = new Map();
         for (const w of snap.docs){
           const uid = w.ref.parent?.parent?.id;
@@ -179,7 +141,11 @@
           const d = w.data() || {};
           const wins = toNum(d.wins), losses = toNum(d.losses);
 
-          if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name: d.userName || d.name || d.displayName, wins: 0, losses: 0 });
+          if (!byUser.has(uid)) byUser.set(uid, {
+            userId: uid,
+            name: d.userName || d.name || d.displayName,
+            wins: 0, losses: 0
+          });
           const agg = byUser.get(uid);
           agg.wins   += wins;
           agg.losses += losses;
@@ -188,13 +154,13 @@
         stats = Object.fromEntries([...byUser.entries()].map(([uid, v]) => [uid, v]));
         const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
         if (missing.length) await enrichNames(missing);
-        $source.textContent = "Source: collectionGroup('weeks') totals (live fallback)";
-        render();
-      } catch (e) { showErr(e); }
-    }, (err)=> showErr(err));
 
-    // clean up if navigated away
-    window.addEventListener('beforeunload', ()=>{ try{stopA();stopB();}catch{} });
+        render();
+      }catch(e){
+        if ($err){ $err.style.display='block'; $err.textContent = e.stack || e.message || String(e); }
+        console.error(e);
+      }
+    });
   </script>
 </body>
 </html>
