@@ -28,6 +28,9 @@
   .toast.show{opacity:1}
   .badge{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:2px 6px;background:var(--card);color:var(--fg);cursor:pointer}
   .admin-chip{font-size:11px;opacity:.85}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border:1px solid var(--border);padding:8px;text-align:left}
+  th{background:#12151c}
 </style>
 </head>
 <body>
@@ -61,7 +64,51 @@
     </div>
 
     <div id="games" class="card" style="margin-top:8px">
+      <div class="bar"><strong>Games</strong><span class="muted">Pick winners before kickoff</span></div>
       <div class="muted" id="noGames" style="display:none">No games yet for this week.</div>
+      <div id="gameList"></div>
+    </div>
+
+    <div id="standings" class="card" style="margin-top:8px">
+      <div class="bar">
+        <strong>Standings — Week <span id="wkNum">1</span></strong>
+        <div id="publishWrap" style="display:none" class="row">
+          <button id="recalcBtn" class="badge">Recalculate</button>
+          <button id="publishBtn" class="badge">Publish</button>
+        </div>
+      </div>
+      <div id="standingsBody">
+        <div class="muted">Standings will appear once there are winners and picks.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="bar">
+        <div class="muted">Your picks autosave</div>
+        <div id="adminToolbar" style="display:none">
+          <button id="addGameBtn">+ Add game</button>
+          <button id="clearGamesBtn" title="Delete all games in this week">Clear games</button>
+        </div>
+      </div>
+
+      <!-- Admin add panel -->
+      <div id="adminAddPanel" style="display:none;margin-top:8px">
+        <div class="row">
+          <select id="gameDay" title="Day">
+            <option value="Thursday">Thursday</option>
+            <option value="Friday">Friday</option>
+            <option value="Saturday">Saturday</option>
+            <option value="Sunday" selected>Sunday</option>
+            <option value="Monday">Monday</option>
+          </select>
+          <input id="homeTeam" placeholder="Home team (e.g., Cowboys)" />
+          <input id="awayTeam" placeholder="Away team (e.g., Eagles)" />
+          <input id="kickoff" type="datetime-local" title="Kickoff local time" />
+          <button id="saveGameBtn" class="primary">Save game</button>
+        </div>
+      </div>
+    </div>
+  </div>
       <div id="gameList"></div>
     </div>
 
@@ -106,6 +153,7 @@
     initializeFirestore, getFirestore, doc, setDoc, onSnapshot,
     collection, addDoc, query, orderBy, getDocs, deleteDoc
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  import { collectionGroup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
   // --- Firebase config (yours) ---
   const firebaseConfig = {
@@ -168,6 +216,7 @@
 
     await setupWeeks();
     await subscribeWeek();
+    wireStandingsButtons();
   });
 
   async function setupWeeks(){
@@ -318,6 +367,13 @@
     }
 
     el("#noGames").style.display = any ? "none" : "";
+
+    // Update week label on standings card
+    const wk = Number(state.weekId.split("-").pop());
+    el("#wkNum").textContent = String(wk);
+
+    // Recompute standings whenever games render
+    computeWeekStandings();
   }
 
   // --- Actions ---
@@ -325,7 +381,7 @@
     if (state.lock && !state.isAdmin) return;
     state.picks[gameId] = side;
     const ref = doc(db, "picks", state.user.uid, "weeks", state.weekId);
-    await setDoc(ref, { picks: state.picks, updatedAt: Date.now(), email: state.user.email }, { merge:true });
+    await setDoc(ref, { weekId: state.weekId, picks: state.picks, updatedAt: Date.now(), email: state.user.email }, { merge:true });
     toast();
     renderGames();
   }
@@ -335,6 +391,7 @@
     const ref = doc(db, "weeks", state.weekId, "games", gameId);
     await setDoc(ref, { winner: side ?? null }, { merge:true });
     toast(side ? `Winner set: ${side}` : "Winner cleared");
+    computeWeekStandings();
   }
 
   async function saveGame(){
@@ -359,6 +416,7 @@
     let n=0; for (const d of snap.docs){ await deleteDoc(d.ref); n++; }
     console.log("Cleared", n, "games for", state.weekId);
     toast("Cleared " + n + " games");
+    computeWeekStandings();
   }
 
   // --- Seeder: accepts {day, home, away, kickoff:"ISO"} or {kickoffTs:number} ---
@@ -375,12 +433,82 @@
       n++;
     }
     console.log("Seeded", n, "games into", state.weekId);
+    computeWeekStandings();
+  }
+
+  // --- Standings (Week + Publish + Overall helper) ---
+  function wireStandingsButtons(){
+    el("#publishWrap").style.display = state.isAdmin ? "" : "none";
+    el("#recalcBtn")?.addEventListener("click", computeWeekStandings);
+    el("#publishBtn")?.addEventListener("click", publishWeekStandings);
+  }
+
+  async function computeWeekStandings(){
+    try{
+      // Build winners map for current week
+      const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+      const winners = {}; let totalGames=0;
+      gamesSnap.forEach(d => { const g=d.data(); if (g.winner==="home"||g.winner==="away"){ winners[d.id]=g.winner; totalGames++; } });
+
+      // Pull all users' picks for this week via collectionGroup
+      const cg = await getDocs(query(collectionGroup(db, "weeks"),));
+      const rows = [];
+      cg.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.weekId !== state.weekId) return; // only this week
+        const picks = data.picks || {}; const email = data.email || docSnap.ref.path.split("/")[1];
+        let wins=0, played=0;
+        for (const [gameId, side] of Object.entries(picks)){
+          const w = winners[gameId]; if (!w) continue; played++;
+          if (w === side) wins++;
+        }
+        rows.push({ email, wins, played });
+      });
+
+      rows.sort((a,b)=> b.wins - a.wins || a.email.localeCompare(b.email));
+      renderStandingsTable(rows, totalGames);
+    }catch(e){
+      console.error("standings error", e);
+      el("#standingsBody").innerHTML = `<div class=muted>Unable to compute standings (${e.message}).</div>`;
+    }
+  }
+
+  function renderStandingsTable(rows, totalGames){
+    if (!rows.length){ el("#standingsBody").innerHTML = `<div class=muted>No data yet.</div>`; return; }
+    const pct = (w, t) => t? (w/t*100).toFixed(1)+"%" : "—";
+    const html = [
+      `<table><thead><tr><th>Rank</th><th>User</th><th>Wins</th><th>Played</th><th>Win %</th></tr></thead><tbody>`,
+      ...rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.email}</td><td>${r.wins}</td><td>${r.played}/${totalGames}</td><td>${pct(r.wins, r.played)}</td></tr>`),
+      `</tbody></table>`
+    ].join("");
+    el("#standingsBody").innerHTML = html;
+  }
+
+  async function publishWeekStandings(){
+    if (!state.isAdmin) return;
+    // Save a compact leaderboard doc per user so we can sum for overall later
+    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+    const winners = {}; gamesSnap.forEach(d => { const g=d.data(); if (g.winner) winners[d.id]=g.winner; });
+
+    const cg = await getDocs(collectionGroup(db, "weeks"));
+    const batch = [];
+    for (const docSnap of cg.docs){
+      const data = docSnap.data(); if (data.weekId !== state.weekId) continue;
+      const picks = data.picks || {}; const email = data.email || docSnap.ref.path.split("/")[1];
+      let wins=0; for (const [gid,side] of Object.entries(picks)){ if (winners[gid] && winners[gid]===side) wins++; }
+      const uid = docSnap.ref.path.split("/")[1];
+      const ref = doc(db, "leaderboards", "weeks", state.weekId, "scores", uid);
+      batch.push(setDoc(ref, { email, wins, weekId: state.weekId, updatedAt: Date.now() }, { merge:true }));
+    }
+    await Promise.all(batch);
+    toast("Week standings published");
   }
 
   // --- Expose helpers for console ---
   window.appState = state;
-  window.fx = { seedWeek1, clearGames, addDoc, collection, setWinner };
+  window.fx = { seedWeek1, clearGames, addDoc, collection, setWinner, computeWeekStandings, publishWeekStandings };
   window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
+ = () => console.log("Your UID:", auth.currentUser?.uid);
 </script>
 </body>
 </html>
