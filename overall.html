@@ -25,19 +25,29 @@
       </table>
     </div>
   </div>
+  
+  <script>
+    window.FIREBASE_CONFIG = {
+      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+      authDomain: "nfl-picks-b83c2.firebaseapp.com",
+      projectId: "nfl-picks-b83c2",
+      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
+      messagingSenderId: "802058909501",
+      appId: "1:802058909501:web:bb935c188891934de07754",
+      measurementId: "G-MSJHYZ4VG2"
+    };
+  </script>
 
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { getFirestore, collectionGroup, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
-    const app = initializeApp({
-      apiKey: "YOUR_KEY",
-      authDomain: "nfl-picks-b83c2.firebaseapp.com",
-      projectId: "nfl-picks-b83c2"
-    });
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    
+    const app = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
     const auth = getAuth(app);
     const db = getFirestore(app);
+    
+    // Sign in anonymously so reads work
     await signInAnonymously(auth);
 
     const tbody = document.querySelector("#standings tbody");
