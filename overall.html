@@ -63,104 +63,122 @@
     });
   </script>
 
-  <script type="module">
-    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import {
-      getFirestore, collectionGroup, onSnapshot, doc, getDoc
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+<script type="module">
+  import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import {
+    getFirestore,
+    collectionGroup,
+    onSnapshot,
+    doc,
+    getDoc,
+    collection
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-    // --- init ---
-    const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
-    const auth = getAuth(app);
-    const db   = getFirestore(app);
-    try { await signInAnonymously(auth); } catch(e){ console.warn("anon auth failed:", e.message); }
-    // expose for console debugging if you want
-    window.auth = auth;
+  // --- init ---
+  const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+  try { await signInAnonymously(auth); } catch (e) { console.warn("anon auth failed:", e.message); }
+  window.auth = auth; // optional for console
 
-    // --- dom ---
-    const tbody   = document.querySelector("#standings tbody");
-    const $err    = document.getElementById('err');
-    const showErr = (m)=>{ $err.style.display='block'; $err.textContent = m instanceof Error ? (m.stack||m.message) : String(m); };
+  // --- dom ---
+  const tbody = document.querySelector("#standings tbody");
+  const $err  = document.getElementById("err") || (()=>{ const d=document.createElement('div'); d.id='err'; d.style.display='none'; document.body.appendChild(d); return d; })();
+  const showErr = (m) => { $err.style.display='block'; $err.textContent = m instanceof Error ? (m.stack||m.message) : String(m); };
+  const esc = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
-    const esc = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    const toBoolCorrect = (val) => {
-      const c = val;
-      if (typeof c === 'boolean') return c;
-      if (typeof c === 'number') return c > 0;
-      if (typeof c === 'string') return ['true','t','1','w','win','correct','W'].includes(c.toLowerCase());
-      return false;
-    };
+  const toBoolCorrect = (v) => {
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'number')  return v > 0;
+    if (typeof v === 'string')  return ['true','t','1','w','win','correct','W'].includes(v.toLowerCase());
+    return false;
+  };
+  const toNum = (v) => (v === true ? 1 : v === false ? 0 : Number.isFinite(Number(v)) ? Number(v) : 0);
 
-    // uid -> { userId, name?, wins, losses }
-    let stats = {};
+  // uid -> {userId, name?, wins, losses}
+  let stats = {};
 
-    function render() {
-      const rows = Object.values(stats)
-        .map(r => ({...r}))
-        .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
+  function render() {
+    const rows = Object.values(stats)
+      .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
 
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="4">No data</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = rows.map((r,i)=>`
+    tbody.innerHTML = rows.length
+      ? rows.map((r,i)=>`
         <tr>
           <td>${i+1}</td>
           <td>${esc(r.name ?? r.userName ?? r.displayName ?? r.userId ?? 'Unknown')}</td>
-          <td class="num">${r.wins}</td>
-          <td class="num">${r.losses}</td>
-        </tr>
-      `).join("");
-    }
+          <td class="num">${r.wins ?? 0}</td>
+          <td class="num">${r.losses ?? 0}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="4">No data</td></tr>`;
+  }
 
-    async function enrichNames(missingUids){
-      await Promise.all(missingUids.map(async uid=>{
-        try{
-          const snap = await getDoc(doc(db, "publicUsers", uid));
-          if (snap.exists()) {
-            const n = snap.data().displayName || uid;
-            if (stats[uid]) stats[uid].name = n;
-          }
-        }catch{}
-      }));
-    }
-
-    // Live listener across ALL picks (per-game docs)
-    onSnapshot(collectionGroup(db, "picks"), async (snap)=>{
+  async function enrichNames(uidsMissing){
+    await Promise.all(uidsMissing.map(async uid=>{
       try {
-        // Rebuild fresh each time for correctness/simplicity
-        const next = Object.create(null);
+        const snap = await getDoc(doc(db, "publicUsers", uid));
+        if (snap.exists() && stats[uid]) stats[uid].name = snap.data().displayName || uid;
+      } catch {}
+    }));
+  }
 
-        snap.forEach(docSnap=>{
-          const d = docSnap.data() || {};
-          // Path: picks/{uid}/weeks/{weekId}/picks/{gameId}
-          const weekRef = docSnap.ref.parent.parent;           // .../weeks/{weekId}
-          const uid     = weekRef?.parent?.id;                 // .../picks/{uid}
-          if (!uid) return;
+  // --- Source A: live per-game docs (if your app writes /picks/{uid}/weeks/{weekId}/picks/{gameId})
+  let gotAnyPickDocs = false;
+  const stopA = onSnapshot(collectionGroup(db, "picks"), async (snap)=>{
+    try {
+      const next = Object.create(null);
+      snap.forEach(s => {
+        const d = s.data() || {};
+        const weekRef = s.ref.parent?.parent;      // .../weeks/{weekId}
+        const uid = weekRef?.parent?.id;           // .../picks/{uid}
+        if (!uid) return;
 
-          if (!next[uid]) next[uid] = { userId: uid, name: d.userName, wins: 0, losses: 0 };
+        if (!next[uid]) next[uid] = { userId: uid, name: d.userName, wins: 0, losses: 0 };
+        const correct = toBoolCorrect(d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result);
+        if (correct) next[uid].wins++; else next[uid].losses++;
+        if (!next[uid].name && d.userName) next[uid].name = d.userName;
+      });
 
-          const correct = toBoolCorrect(d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result);
-          if (correct) next[uid].wins++; else next[uid].losses++;
-          // prefer a human name if present on pick docs
-          if (!next[uid].name && d.userName) next[uid].name = d.userName;
-        });
-
+      gotAnyPickDocs = snap.size > 0;
+      if (gotAnyPickDocs) {
         stats = next;
-
-        // Enrich missing names from /publicUsers
         const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
         if (missing.length) await enrichNames(missing);
-
         render();
-      } catch (e) {
-        showErr(e);
       }
-    }, (err) => {
-      showErr(err);
-    });
-  </script>
+    } catch (e) { showErr(e); }
+  }, err => showErr(err));
+
+  // --- Source B: fall back to totals stored on week docs (/picks/{uid}/weeks/{weekId})
+  const stopB = onSnapshot(collectionGroup(db, "weeks"), async (snap)=>{
+    try {
+      // Only use this source if Source A hasn't produced any docs
+      if (gotAnyPickDocs) return;
+
+      const byUser = new Map();
+      for (const w of snap.docs) {
+        const uid = w.ref.parent?.parent?.id;
+        if (!uid) continue;
+        const d = w.data() || {};
+        const wins = toNum(d.wins), losses = toNum(d.losses);
+
+        if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name: d.userName || d.name || d.displayName, wins: 0, losses: 0 });
+        const agg = byUser.get(uid);
+        agg.wins += wins;
+        agg.losses += losses;
+      }
+
+      stats = Object.fromEntries([...byUser.entries()].map(([uid, v]) => [uid, v]));
+      const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
+      if (missing.length) await enrichNames(missing);
+      render();
+    } catch (e) { showErr(e); }
+  }, err => showErr(err));
+
+  // optional: clean up if you ever navigate away in SPA
+  window.addEventListener('beforeunload', ()=>{ stopA?.(); stopB?.(); });
+</script>
+
 </body>
 </html>
