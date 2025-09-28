@@ -55,10 +55,10 @@
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
       getFirestore, collection, collectionGroup, onSnapshot,
-      getDoc, doc
+      getDocs, getDoc, doc
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
   
-    // Use your actual config (or window.FIREBASE_CONFIG if you already set it above)
+    // ---- Firebase init (use your real config or window.FIREBASE_CONFIG) ----
     const app = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG || {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
       authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -75,120 +75,139 @@
     const $source  = document.getElementById("source");
     const $updated = document.getElementById("updated");
     const $err     = document.getElementById("error");
+  
     const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const toSide = v => String(v ?? "").toLowerCase().trim();     // "home" | "away"
+    const lc  = s => String(s ?? "").toLowerCase().trim();
   
-    // Global state
-    const weekIds = new Set();                 // discovered week ids (e.g. "2025-Week-01")
-    const winnersByWeek = new Map();           // weekId -> { gameId: "home"|"away" }
-    const picksByUserWeek = new Map();         // `${uid}|${weekId}` -> { userId, userName, picks: {gameId:"home|away"} }
-    let unsubs = [];                           // to clean up listeners if needed
+    // winnersByWeek: weekId -> { [gameId]: { winner, home, away } }
+    const winnersByWeek = new Map();
+    // userWeeks: `${uid}|${weekId}` -> { uid, weekId, picks, name }
+    const userWeeks = new Map();
+    const weekListeners = new Map();
   
-    function upsertUserWeek(uid, weekId, data){
-      const key = `${uid}|${weekId}`;
-      const current = picksByUserWeek.get(key) || { userId: uid, weekId, picks: {}, userName: undefined };
-      // merge picks map (we only need the {gameId: "home"|"away"} map)
-      const src = data?.picks || {};
-      current.picks = src && typeof src === 'object' ? src : {};
-      current.userName = data?.userName || data?.name || data?.displayName || current.userName;
-      picksByUserWeek.set(key, current);
+    function setUserWeek(uid, weekId, data){
+      userWeeks.set(`${uid}|${weekId}`, {
+        uid, weekId,
+        picks: (data?.picks && typeof data.picks === 'object') ? data.picks : {},
+        name:  data?.userName || data?.name || data?.displayName
+      });
     }
   
-    async function enrichDisplayNames(perUser){
-      const missing = Object.values(perUser).filter(r => !r.name).map(r => r.userId);
+    async function attachWinnersListener(weekId){
+      if (weekListeners.has(weekId)) return;
+  
+      const tryPath = async (factory, label) => {
+        try {
+          // attach even if 0; we want live updates when winners are filled in
+          const unsub = onSnapshot(factory(), (snap)=>{
+            const m = {};
+            snap.forEach(g => {
+              const d = g.data() || {};
+              m[g.id] = {
+                winner: lc(d.winner ?? d.result ?? ""),
+                home:   lc(d.home   ?? d.homeTeam ?? ""),
+                away:   lc(d.away   ?? d.awayTeam ?? "")
+              };
+            });
+            winnersByWeek.set(weekId, m);
+            // helpful console
+            console.log(`[winners] ${label}(${weekId}) ->`, Object.keys(m).length, "games");
+            renderNow();
+          });
+          return unsub;
+        } catch { return null; }
+      };
+  
+      let unsub = await tryPath(() => collection(db, "weeks", weekId, "games"), "/weeks/*/games");
+      if (!unsub) unsub = await tryPath(() => collection(db, weekId, "games"), "/{weekId}/games");
+      if (!unsub) unsub = await tryPath(() => collection(db, weekId, weekId, "games"), "/{weekId}/{weekId}/games");
+      if (unsub) weekListeners.set(weekId, unsub);
+    }
+  
+    function pickToSide(pickValue, game){
+      const p = lc(pickValue);
+      if (!p) return "";
+      if (p === "home" || p === "away") return p;
+      // try team-name match
+      if (game) {
+        if (p === game.home || game.home.includes(p)) return "home";
+        if (p === game.away || game.away.includes(p)) return "away";
+      }
+      return "";
+    }
+  
+    async function enrichNames(rows){
+      const missing = rows.filter(r => !r.name).map(r => r.uid);
       await Promise.all(missing.map(async uid=>{
         try {
           const s = await getDoc(doc(db, "publicUsers", uid));
-          if (s.exists()) perUser[uid].name = s.data().displayName || uid;
+          if (s.exists()) rows.find(r => r.uid === uid).name = s.data().displayName || uid;
         } catch {}
       }));
     }
   
     function computeTotals(){
-      // Aggregate across all weeks using winnersByWeek + picksByUserWeek
-      const perUser = {};
-      for (const { userId, weekId, picks, userName } of picksByUserWeek.values()){
-        const weekWinners = winnersByWeek.get(weekId) || {};
-        if (!perUser[userId]) perUser[userId] = { userId, name: userName, wins: 0, losses: 0 };
+      const perUser = new Map(); // uid -> { uid, name, wins, losses }
+      for (const { uid, weekId, picks, name } of userWeeks.values()){
+        const winners = winnersByWeek.get(weekId) || {};
+        const row = perUser.get(uid) || { uid, name, wins: 0, losses: 0 };
   
-        for (const [gameId, pickVal] of Object.entries(picks || {})){
-          const pick = toSide(pickVal);
-          const winr = toSide(weekWinners[gameId]);
-          if (!pick || !winr) continue;
-          if (pick === winr) perUser[userId].wins++;
-          else               perUser[userId].losses++;
+        for (const [gameId, pickVal] of Object.entries(picks)){
+          const game = winners[gameId];                 // { winner, home, away }
+          if (!game) continue;                          // no winner yet or wrong id
+          const side = pickToSide(pickVal, game);       // normalize to "home"/"away"
+          if (!side) continue;
+          if (side === game.winner) row.wins++;
+          else                      row.losses++;
         }
+        perUser.set(uid, row);
       }
-      return perUser;
+      return Array.from(perUser.values());
     }
   
     async function renderNow(){
       try {
-        const perUser = computeTotals();
-        await enrichDisplayNames(perUser);
-  
-        const rows = Object.values(perUser)
-          .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
+        const rows = computeTotals()
+          .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.uid).localeCompare(String(b.name||b.uid)));
+        await enrichNames(rows);
   
         tbody.innerHTML = rows.length
           ? rows.map((r,i)=>`
-            <tr>
-              <td>${i+1}</td>
-              <td>${esc(r.name ?? r.userId)}</td>
-              <td class="num">${r.wins}</td>
-              <td class="num">${r.losses}</td>
-            </tr>`).join("")
+             <tr>
+               <td>${i+1}</td>
+               <td>${esc(r.name ?? r.uid)}</td>
+               <td class="num">${r.wins}</td>
+               <td class="num">${r.losses}</td>
+             </tr>`).join("")
           : `<tr><td colspan="4">No data</td></tr>`;
   
         $updated.textContent = "Updated: " + new Date().toLocaleString();
-        $source.textContent  = "Source: winners(/weeks/*/games) + picks maps(/picks/*/weeks/*) (live)";
+        $source.textContent  = "Source: winners(/weeks/*/games or /{week}/games) + picks maps(/picks/*/weeks/*)";
         if ($err) $err.style.display = "none";
-      } catch(e){
+      } catch (e) {
         console.error(e);
         if ($err){ $err.style.display='block'; $err.textContent = e.message; }
       }
     }
   
-    // 1) Listen to the root /weeks collection to discover weekIds, and for each, listen to /games
-    unsubs.push(
-      onSnapshot(collection(db, "weeks"), (weeksSnap)=>{
-        weeksSnap.forEach(weekDoc=>{
-          const wId = weekDoc.id;
-          if (weekIds.has(wId)) return;
-          weekIds.add(wId);
+    // Listen to all user week docs under /picks/*/weeks/*
+    onSnapshot(collectionGroup(db, "weeks"), (snap)=>{
+      const seenWeeks = new Set();
+      snap.forEach(w=>{
+        const parent = w.ref.parent?.parent;            // /picks/{uid}
+        if (!parent || parent.parent?.id !== "picks") return;
+        const uid = parent.id;
+        const weekId = w.id;
+        setUserWeek(uid, weekId, w.data());
+        seenWeeks.add(weekId);
+      });
+      for (const wId of seenWeeks) attachWinnersListener(wId);
+      renderNow();
+    });
   
-          // winners for this week
-          unsubs.push(onSnapshot(collection(db, "weeks", wId, "games"), (gamesSnap)=>{
-            const winners = {};
-            gamesSnap.forEach(g=>{
-              const d = g.data() || {};
-              winners[g.id] = toSide(d.winner ?? d.result ?? d.w ?? d.W ?? "");
-            });
-            winnersByWeek.set(wId, winners);
-            renderNow();
-          }));
-        });
-      })
-    );
-  
-    // 2) Listen to all week docs under /picks/*/weeks/* (we only need id + picks map)
-    //    We filter in code to week docs (id === some week in weekIds) and read the 'picks' map.
-    unsubs.push(
-      onSnapshot(collectionGroup(db, "weeks"), (snap)=>{
-        snap.forEach(w=>{
-          const weekId = w.id;
-          // Only consider user-week docs under /picks/{uid}/weeks/{weekId}
-          const maybeUser = w.ref.parent?.parent; // /picks/{uid}
-          if (!maybeUser || maybeUser.parent?.id !== "picks") return;
-          const uid = maybeUser.id;
-          upsertUserWeek(uid, weekId, w.data());
-        });
-        renderNow();
-      })
-    );
-  
-    window.addEventListener('beforeunload', ()=>{ try{ unsubs.forEach(u=>u&&u()); }catch{} });
+    window.addEventListener('beforeunload', ()=>{ for (const u of weekListeners.values()) try{u()}catch{} });
   </script>
+
 
 </body>
 </html>
