@@ -60,7 +60,16 @@
       <div class="footer" id="sourceHint">Source: <span id="sourceLabel">detecting…</span></div>
     </div>
   </div>
-
+  
+  <script>
+    window.FIREBASE_CONFIG = {
+      apiKey: "YOUR_REAL_KEY",
+      authDomain: "your-project-id.firebaseapp.com",
+      projectId: "your-project-id",
+    };
+    window.BUILD_ID = "overall-2025-09-28-22:25"; // optional sanity tag
+  </script>
+  
   <!-- Firebase (v10+ modular) via ESM CDN. If you bundle, replace with your imports. -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
