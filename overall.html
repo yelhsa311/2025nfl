@@ -5,44 +5,57 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>NFL Picks — Overall Standings</title>
   <style>
-    :root { --card:#0f172a; --line:#1f2937; --bg:#0b1220; --fg:#e6edf3; }
+    :root { --bg:#0b1220; --fg:#e6edf3; --card:#0f172a; --line:#1f2937; --accent:#1f6feb; }
     html,body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-    .wrap{max-width:980px;margin:32px auto;padding:0 16px}
-    h1{margin:0 0 8px}
-    .sub{opacity:.85;margin:0 0 16px;font-size:14px}
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+    h1{margin:0}
+    .sub{opacity:.85;margin:0 0 12px}
     .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px}
-    .pill{display:inline-block;background:#111827;border:1px solid var(--line);border-radius:999px;padding:3px 8px;font-size:12px;opacity:.9}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .right{margin-left:auto}
+    a.button,button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:12px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+    a.button:visited{color:#fff}
+    button:disabled{opacity:.6;cursor:progress}
+    .pill{display:inline-flex;gap:8px;align-items:center;background:#111827;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;opacity:.9}
     table{width:100%;border-collapse:collapse;margin-top:12px}
     th,td{padding:10px 12px;border-bottom:1px solid var(--line)}
     th{opacity:.8;text-transform:uppercase;font-size:12px;letter-spacing:.06em;text-align:left}
-    .num{font-variant-numeric:tabular-nums;text-align:right}
+    .num{text-align:right;font-variant-numeric:tabular-nums}
     tbody tr:hover{background:#0b132a}
     .muted{opacity:.75;font-size:12px;margin-top:8px}
-    .err{margin-top:10px;background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px;border-radius:10px;white-space:pre-wrap}
+    .err{margin-top:12px;background:#3b1d1d;border:1px solid #6b1d1d;color:#ffdada;padding:10px;border-radius:10px;white-space:pre-wrap}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Overall Standings</h1>
+    <header>
+      <h1>Overall Standings</h1>
+      <a class="button" href="./index.html" title="Back to Weeks">← Back to Weeks</a>
+    </header>
     <p class="sub">Totals across <b>all weeks</b>. Updates live as admins mark wins/losses.</p>
 
     <div class="card">
-      <div><span class="pill" id="build">BUILD: …</span></div>
+      <div class="row">
+        <span class="pill" id="build">BUILD: …</span>
+        <span class="pill" id="source">Source: …</span>
+        <span class="right pill" id="updated">Updated: —</span>
+      </div>
 
       <table id="standings">
         <thead>
           <tr>
-            <th style="width:64px">Rank</th>
+            <th style="width:72px">Rank</th>
             <th>Player</th>
             <th class="num" style="width:120px">Wins</th>
             <th class="num" style="width:120px">Losses</th>
           </tr>
         </thead>
-        <tbody></tbody>
+        <tbody><tr><td colspan="4">Loading…</td></tr></tbody>
       </table>
 
-      <div class="muted">Source: <code>collectionGroup('picks')</code> + name lookup from <code>/publicUsers/{uid}</code>.</div>
       <div id="err" class="err" style="display:none"></div>
+      <div class="muted">Names come from the pick docs or <code>/publicUsers/{uid}</code>.</div>
     </div>
   </div>
 
@@ -58,127 +71,130 @@
       measurementId: "G-MSJHYZ4VG2"
     };
     document.addEventListener('DOMContentLoaded', () => {
-      const b = document.getElementById('build');
-      b.textContent = `BUILD: overall-${new Date().toISOString()}`;
+      document.getElementById('build').textContent = `BUILD: overall-${new Date().toISOString()}`;
     });
   </script>
 
-<script type="module">
-  import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import {
-    getFirestore,
-    collectionGroup,
-    onSnapshot,
-    doc,
-    getDoc,
-    collection
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  <script type="module">
+    import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      getFirestore,
+      collectionGroup,
+      onSnapshot,
+      doc, getDoc,
+      collection
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // --- init ---
-  const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
-  const auth = getAuth(app);
-  const db   = getFirestore(app);
-  try { await signInAnonymously(auth); } catch (e) { console.warn("anon auth failed:", e.message); }
-  window.auth = auth; // optional for console
+    // ---------- init ----------
+    const app  = getApps().length ? getApps()[0] : initializeApp(window.FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db   = getFirestore(app);
+    try { await signInAnonymously(auth); } catch(e){ console.warn("anon auth failed:", e.message); }
 
-  // --- dom ---
-  const tbody = document.querySelector("#standings tbody");
-  const $err  = document.getElementById("err") || (()=>{ const d=document.createElement('div'); d.id='err'; d.style.display='none'; document.body.appendChild(d); return d; })();
-  const showErr = (m) => { $err.style.display='block'; $err.textContent = m instanceof Error ? (m.stack||m.message) : String(m); };
-  const esc = s => String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    // ---------- DOM ----------
+    const tbody    = document.querySelector("#standings tbody");
+    const $err     = document.getElementById('err');
+    const $source  = document.getElementById('source');
+    const $updated = document.getElementById('updated');
 
-  const toBoolCorrect = (v) => {
-    if (typeof v === 'boolean') return v;
-    if (typeof v === 'number')  return v > 0;
-    if (typeof v === 'string')  return ['true','t','1','w','win','correct','W'].includes(v.toLowerCase());
-    return false;
-  };
-  const toNum = (v) => (v === true ? 1 : v === false ? 0 : Number.isFinite(Number(v)) ? Number(v) : 0);
+    const showErr = (m)=>{ $err.style.display='block'; $err.textContent = m instanceof Error ? (m.stack||m.message) : String(m); console.error(m); };
+    const esc = s => String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
-  // uid -> {userId, name?, wins, losses}
-  let stats = {};
+    const toBoolCorrect = (v) => {
+      if (typeof v === 'boolean') return v;
+      if (typeof v === 'number')  return v > 0;
+      if (typeof v === 'string')  return ['true','t','1','w','win','correct','W'].includes(v.toLowerCase());
+      return false;
+    };
+    const toNum = (v) => (v === true ? 1 : v === false ? 0 : Number.isFinite(Number(v)) ? Number(v) : 0);
 
-  function render() {
-    const rows = Object.values(stats)
-      .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
+    // uid -> { userId, name?, wins, losses }
+    let stats = {};
+    let havePickDocs = false; // flips true if any per-game docs exist
 
-    tbody.innerHTML = rows.length
-      ? rows.map((r,i)=>`
-        <tr>
-          <td>${i+1}</td>
-          <td>${esc(r.name ?? r.userName ?? r.displayName ?? r.userId ?? 'Unknown')}</td>
-          <td class="num">${r.wins ?? 0}</td>
-          <td class="num">${r.losses ?? 0}</td>
-        </tr>`).join("")
-      : `<tr><td colspan="4">No data</td></tr>`;
-  }
+    function render() {
+      const rows = Object.values(stats)
+        .map(r => ({...r, wins: toNum(r.wins), losses: toNum(r.losses)}))
+        .sort((a,b)=> (b.wins - a.wins) || (a.losses - b.losses) || String(a.name||a.userId).localeCompare(String(b.name||b.userId)));
 
-  async function enrichNames(uidsMissing){
-    await Promise.all(uidsMissing.map(async uid=>{
+      tbody.innerHTML = rows.length
+        ? rows.map((r,i)=>`
+          <tr>
+            <td>${i+1}</td>
+            <td>${esc(r.name ?? r.userName ?? r.displayName ?? r.userId ?? 'Unknown')}</td>
+            <td class="num">${r.wins}</td>
+            <td class="num">${r.losses}</td>
+          </tr>`).join("")
+        : `<tr><td colspan="4">No data</td></tr>`;
+
+      $updated.textContent = `Updated: ${new Date().toLocaleString()}`;
+    }
+
+    async function enrichNames(uids){
+      await Promise.all(uids.map(async uid=>{
+        try{
+          const snap = await getDoc(doc(db, "publicUsers", uid));
+          if (snap.exists() && stats[uid]) stats[uid].name = snap.data().displayName || uid;
+        }catch{}
+      }));
+    }
+
+    // ---------- Source A: per-game picks subcollection (live) ----------
+    const stopA = onSnapshot(collectionGroup(db, "picks"), async (snap)=>{
       try {
-        const snap = await getDoc(doc(db, "publicUsers", uid));
-        if (snap.exists() && stats[uid]) stats[uid].name = snap.data().displayName || uid;
-      } catch {}
-    }));
-  }
+        const next = Object.create(null);
+        snap.forEach(s=>{
+          const d = s.data() || {};
+          const weekRef = s.ref.parent?.parent;   // .../weeks/{weekId}
+          const uid = weekRef?.parent?.id;        // .../picks/{uid}
+          if (!uid) return;
 
-  // --- Source A: live per-game docs (if your app writes /picks/{uid}/weeks/{weekId}/picks/{gameId})
-  let gotAnyPickDocs = false;
-  const stopA = onSnapshot(collectionGroup(db, "picks"), async (snap)=>{
-    try {
-      const next = Object.create(null);
-      snap.forEach(s => {
-        const d = s.data() || {};
-        const weekRef = s.ref.parent?.parent;      // .../weeks/{weekId}
-        const uid = weekRef?.parent?.id;           // .../picks/{uid}
-        if (!uid) return;
+          if (!next[uid]) next[uid] = { userId: uid, name: d.userName, wins: 0, losses: 0 };
+          const correct = toBoolCorrect(d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result);
+          if (correct) next[uid].wins++; else next[uid].losses++;
+          if (!next[uid].name && d.userName) next[uid].name = d.userName;
+        });
 
-        if (!next[uid]) next[uid] = { userId: uid, name: d.userName, wins: 0, losses: 0 };
-        const correct = toBoolCorrect(d.correct ?? d.isCorrect ?? d.win ?? d.won ?? d.result);
-        if (correct) next[uid].wins++; else next[uid].losses++;
-        if (!next[uid].name && d.userName) next[uid].name = d.userName;
-      });
+        havePickDocs = snap.size > 0;
+        if (havePickDocs) {
+          stats = next;
+          const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
+          if (missing.length) await enrichNames(missing);
+          $source.textContent = "Source: collectionGroup('picks') (live)";
+          render();
+        }
+      } catch (e) { showErr(e); }
+    }, (err)=> showErr(err));
 
-      gotAnyPickDocs = snap.size > 0;
-      if (gotAnyPickDocs) {
-        stats = next;
+    // ---------- Source B: week totals fallback (live) ----------
+    const stopB = onSnapshot(collectionGroup(db, "weeks"), async (snap)=>{
+      try {
+        if (havePickDocs) return; // prefer per-game docs when present
+
+        const byUser = new Map();
+        for (const w of snap.docs){
+          const uid = w.ref.parent?.parent?.id;
+          if (!uid) continue;
+          const d = w.data() || {};
+          const wins = toNum(d.wins), losses = toNum(d.losses);
+
+          if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name: d.userName || d.name || d.displayName, wins: 0, losses: 0 });
+          const agg = byUser.get(uid);
+          agg.wins   += wins;
+          agg.losses += losses;
+        }
+
+        stats = Object.fromEntries([...byUser.entries()].map(([uid, v]) => [uid, v]));
         const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
         if (missing.length) await enrichNames(missing);
+        $source.textContent = "Source: collectionGroup('weeks') totals (live fallback)";
         render();
-      }
-    } catch (e) { showErr(e); }
-  }, err => showErr(err));
+      } catch (e) { showErr(e); }
+    }, (err)=> showErr(err));
 
-  // --- Source B: fall back to totals stored on week docs (/picks/{uid}/weeks/{weekId})
-  const stopB = onSnapshot(collectionGroup(db, "weeks"), async (snap)=>{
-    try {
-      // Only use this source if Source A hasn't produced any docs
-      if (gotAnyPickDocs) return;
-
-      const byUser = new Map();
-      for (const w of snap.docs) {
-        const uid = w.ref.parent?.parent?.id;
-        if (!uid) continue;
-        const d = w.data() || {};
-        const wins = toNum(d.wins), losses = toNum(d.losses);
-
-        if (!byUser.has(uid)) byUser.set(uid, { userId: uid, name: d.userName || d.name || d.displayName, wins: 0, losses: 0 });
-        const agg = byUser.get(uid);
-        agg.wins += wins;
-        agg.losses += losses;
-      }
-
-      stats = Object.fromEntries([...byUser.entries()].map(([uid, v]) => [uid, v]));
-      const missing = Object.values(stats).filter(r => !r.name).map(r => r.userId);
-      if (missing.length) await enrichNames(missing);
-      render();
-    } catch (e) { showErr(e); }
-  }, err => showErr(err));
-
-  // optional: clean up if you ever navigate away in SPA
-  window.addEventListener('beforeunload', ()=>{ stopA?.(); stopB?.(); });
-</script>
-
+    // clean up if navigated away
+    window.addEventListener('beforeunload', ()=>{ try{stopA();stopB();}catch{} });
+  </script>
 </body>
 </html>
