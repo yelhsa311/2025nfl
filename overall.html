@@ -31,7 +31,7 @@
 <body>
   <div class="wrap">
     <h1>Overall Standings</h1>
-    <div class="meta">Live totals across all weeks. Loads cached totals if present; otherwise computes from your picks collections.</div>
+    <div class="meta">Live totals across all weeks. Pulls every <code>weeks</code> doc via <code>collectionGroup('weeks')</code>, and sums per-user points from either <code>weeks</code> fields or its <code>picks</code> subcollection.</div>
 
     <div class="card">
       <div class="row">
@@ -64,12 +64,12 @@
   </div>
 
   <script>
-    // Your real Firebase web config
+    // Your real Firebase web config (adjust storageBucket if console shows appspot.com)
     window.FIREBASE_CONFIG = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
       authDomain: "nfl-picks-b83c2.firebaseapp.com",
       projectId: "nfl-picks-b83c2",
-      storageBucket: "nfl-picks-b83c2.firebasestorage.app", // if console shows appspot.com, swap it
+      storageBucket: "nfl-picks-b83c2.firebasestorage.app",
       messagingSenderId: "802058909501",
       appId: "1:802058909501:web:bb935c188891934de07754",
       measurementId: "G-MSJHYZ4VG2"
@@ -80,7 +80,7 @@
   <script type="module">
     import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { getFirestore, collection, collectionGroup, getDocs, onSnapshot, query, orderBy, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { getFirestore, collection, collectionGroup, getDocs, onSnapshot, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const $tbody = document.getElementById('tbody');
     const $sourceLabel = document.getElementById('sourceLabel');
@@ -107,7 +107,9 @@
     // Sign in anonymously so rules requiring auth will pass
     try { await signInAnonymously(auth); } catch(e) { console.warn('Anonymous auth failed (continuing):', e); }
 
-    const STATE = { last: [] };
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
+    }
 
     function render(rows){
       $tbody.innerHTML = '';
@@ -128,11 +130,6 @@
       });
     }
 
-    function escapeHtml(s){
-      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]));
-    }
-
-    // Normalize + sort rows
     function normalizeRows(rows){
       return rows.map(r=>({
         userId: r.userId ?? r.id,
@@ -143,27 +140,7 @@
       })).sort((a,b)=> (b.points - a.points) || (b.correct - a.correct) || String(a.name).localeCompare(String(b.name)));
     }
 
-    // 1) Try cached totals
-    async function tryLiveCachedTotals(){
-      try{
-        const ref = collection(db, 'overallTotals');
-        const unsub = onSnapshot(ref, snap => {
-          const rows = snap.docs.map(d=>({ id:d.id, ...d.data() }));
-          if (rows.length){
-            $sourceLabel.textContent = 'overallTotals (live)';
-            STATE.last = normalizeRows(rows);
-            render(STATE.last);
-          }
-        }, err => console.warn('overallTotals snapshot err', err));
-        const check = await getDocs(ref);
-        if (!check.empty){ return unsub; }
-        unsub();
-      }catch(e){ /* ignore */ }
-      return null;
-    }
-
-    // 2) Compute from your structure
-    async function computeFromPicks(){
+    async function computeFromWeeksCollectionGroup(){
       $refreshBtn.disabled = true;
       $refreshBtn.textContent = 'Recalculating…';
       try {
@@ -177,71 +154,37 @@
           if (week !== undefined && week !== null) agg._weeks.add(String(week));
         };
 
-        let used = '';
+        // Pull all weeks docs anywhere in the DB
+        const weeksSnap = await getDocs(collectionGroup(db, 'weeks'));
+        let used = 'collectionGroup(weeks)';
 
-        // (A) flat /picks (if you ever stored picks flat)
-        try {
-          const top = await getDocs(collection(db, 'picks'));
-          if (!top.empty) {
-            used = '/picks (flat)';
-            for (const ds of top.docs) {
-              const d = ds.data();
-              // If this doc is actually a user-doc container, it won't have pick fields; we'll still proceed to (B)
-              if (d && (d.correct !== undefined || d.points !== undefined || d.result !== undefined)) {
-                const uid = d.userId ?? d.uid ?? ds.id;
-                const name = d.userName ?? d.name;
-                const week = d.week ?? d.weekNumber;
-                const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-                const pts = d.points;
-                add(uid, name, week, correct, pts);
-              }
-            }
+        for (const w of weeksSnap.docs) {
+          const weekId = w.id;               // e.g., "2025w04"
+          const parent = w.ref.parent;       // …/picks/{uid}/weeks
+          const uid = parent?.parent?.id || 'unknown';
+          const d = w.data();
+
+          // Case 1: totals stored on the week doc
+          if (d && (d.points !== undefined || d.score !== undefined || d.total !== undefined || d.correct !== undefined || d.result !== undefined)) {
+            const name = d.userName ?? d.name;
+            const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
+            const pts = d.points ?? d.score ?? d.total;
+            add(uid, name, weekId, correct, pts);
+            continue;
           }
-        } catch {}
 
-        // (B) /picks/{uid}/weeks/{week}/picks (your common shape)
-        if (!byUser.size) {
+          // Case 2: per-game picks subcollection under the week
           try {
-            used = '/picks/{uid}/weeks/{week}/picks';
-            const usersSnap = await getDocs(collection(db, 'picks'));
-            for (const u of usersSnap.docs) {
-              const uid = u.id;
-              const weeksSnap = await getDocs(collection(u.ref, 'weeks'));
-              for (const w of weeksSnap.docs) {
-                try {
-                  const picksSnap = await getDocs(collection(w.ref, 'picks'));
-                  if (!picksSnap.empty) {
-                    for (const p of picksSnap.docs) {
-                      const d = p.data();
-                      const name = d.userName ?? d.name;
-                      const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-                      const pts = d.points;
-                      add(uid, name, w.id, correct, pts);
-                    }
-                  }
-                } catch {/* no subcollection; fall through to (C) */}
-              }
+            const picksSnap = await getDocs(collection(w.ref, 'picks'));
+            for (const p of picksSnap.docs) {
+              const pd = p.data();
+              const name = pd.userName ?? pd.name;
+              const correct = pd.correct === true || pd.isCorrect === true || pd.result === 'win';
+              const pts = pd.points;
+              add(uid, name, weekId, correct, pts);
             }
-          } catch {}
-        }
-
-        // (C) /picks/{uid}/weeks/{week} (week docs hold totals)
-        if (!byUser.size) {
-          try {
-            used = '/picks/{uid}/weeks/{week} (doc totals)';
-            const usersSnap = await getDocs(collection(db, 'picks'));
-            for (const u of usersSnap.docs) {
-              const uid = u.id;
-              const weeksSnap = await getDocs(collection(u.ref, 'weeks'));
-              for (const w of weeksSnap.docs) {
-                const d = w.data();
-                const name = d.userName ?? d.name;
-                const correct = d.correct === true || d.isCorrect === true || d.result === 'win';
-                const pts = d.points ?? d.score ?? d.total;
-                add(uid, name, w.id, correct, pts);
-              }
-            }
-          } catch {}
+            used = "collectionGroup(weeks)+sub('picks')";
+          } catch {/* ignore if no subcollection */}
         }
 
         if (!byUser.size) {
@@ -250,6 +193,7 @@
           return;
         }
 
+        // optional: look up display names from /users/{uid}
         const results = Array.from(byUser.values());
         for (const r of results) {
           if (!r.name) {
@@ -276,11 +220,11 @@
     }
 
     (async ()=>{
-      const unsub = await tryLiveCachedTotals();
-      if (!unsub){ await computeFromPicks(); }
+      // Skip overallTotals since your main data lives under weeks/*
+      await computeFromWeeksCollectionGroup();
     })();
 
-    $refreshBtn.addEventListener('click', computeFromPicks);
+    $refreshBtn.addEventListener('click', computeFromWeeksCollectionGroup);
   </script>
 </body>
 </html>
