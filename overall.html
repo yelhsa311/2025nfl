@@ -162,15 +162,21 @@
         }
 
         const results = Array.from(byUser.values());
-        // enrich names from /users/{uid} when missing
-        for (const r of results) {
+        // 1) Enrich names from /users/{uid} (wait for all to finish)
+        await Promise.all(results.map(async (r) => {
           if (!r.name) {
             try {
-              const u = await getDoc(doc(db, 'users', r.userId));
-              if (u.exists()) r.name = u.data().displayName || u.data().userName || u.data().name || r.userId;
-            } catch {}
+              const snap = await getDoc(doc(db, "users", r.userId));
+              if (snap.exists()) {
+                const d = snap.data() || {};
+                r.name = d.displayName || d.userName || d.name || r.userId;
+                console.log(`looked up displayName for uid=${r.userId} => ${r.name}`);
+              }
+            } catch (e) {
+              console.warn("user lookup failed:", r.userId, e);
+            }
           }
-        }
+        }));
 
         const rows = results
           .map(r => ({ ...r, wins: toNum(r.wins), losses: toNum(r.losses) }))
