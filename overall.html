@@ -166,7 +166,7 @@
         await Promise.all(results.map(async (r) => {
           if (!r.name) {
             try {
-              const snap = await getDoc(doc(db, "users", r.userId));
+              const snap = await getDoc(doc(db, "publicUsers", r.userId));
               if (snap.exists()) {
                 const d = snap.data() || {};
                 r.name = d.displayName || d.userName || d.name || r.userId;
