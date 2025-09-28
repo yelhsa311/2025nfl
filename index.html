@@ -20,16 +20,11 @@
   .muted{color:var(--muted)}
   .danger{color:var(--bad)}
   .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
-  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
-  .toast.show{opacity:1}
-
-  /* Admin controls hidden by default */
-  .adminOnly{ display:none }
-  .is-admin .adminOnly{ display:inline-block !important }
-
   .lock{padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
   .disabled{opacity:.6;pointer-events:none}
   h2.day{margin:16px 0 8px}
+  .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
+  .toast.show{opacity:1}
 </style>
 </head>
 <body>
@@ -50,13 +45,14 @@
     <div class="muted" style="margin-top:6px">Only invited family should register.</div>
   </div>
 
-  <!-- Main App -->
+  <!-- App -->
   <div id="app" class="card" style="display:none">
     <div class="row">
       <label>Week:</label>
       <select id="weekSelect"></select>
       <span id="lockBadge" class="lock muted">…</span>
-      <span class="pill adminOnly">
+      <span class="pill" id="adminBadge" style="display:none">ADMIN</span>
+      <span class="pill" id="finalizeWrap" style="display:none">
         <input id="adminWeekLock" type="checkbox" /> Finalize
       </span>
     </div>
@@ -69,12 +65,14 @@
     <div class="card">
       <div class="bar">
         <div class="muted">Your picks autosave</div>
-        <div>
-          <button id="addGameBtn" class="adminOnly">+ Add game</button>
-          <button id="clearGamesBtn" class="adminOnly" title="Delete all games in this week">Clear games</button>
+        <div id="adminToolbar" style="display:none">
+          <button id="addGameBtn">+ Add game</button>
+          <button id="clearGamesBtn" title="Delete all games in this week">Clear games</button>
         </div>
       </div>
-      <div class="adminOnly" id="adminAddPanel" style="display:none;margin-top:8px">
+
+      <!-- Admin add panel -->
+      <div id="adminAddPanel" style="display:none;margin-top:8px">
         <div class="row">
           <select id="gameDay" title="Day">
             <option value="Thursday">Thursday</option>
@@ -85,6 +83,7 @@
           </select>
           <input id="homeTeam" placeholder="Home team (e.g., Cowboys)" />
           <input id="awayTeam" placeholder="Away team (e.g., Eagles)" />
+          <input id="kickoff" type="datetime-local" title="Kickoff local time" />
           <button id="saveGameBtn" class="primary">Save game</button>
         </div>
       </div>
@@ -94,7 +93,6 @@
   <div class="toast" id="toast">Saved!</div>
 </div>
 
-<!-- Firebase (ESM) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import {
@@ -106,7 +104,7 @@
     collection, addDoc, query, orderBy, getDocs, deleteDoc
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // --- Your Firebase config ---
+  // --- Firebase config (yours) ---
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
     authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -117,67 +115,64 @@
     measurementId: "G-MSJHYZ4VG2"
   };
 
-  // ---------- INIT ----------
+  // --- Init ---
   const app = initializeApp(firebaseConfig);
   initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  // --- ADMIN SETUP (your UID) ---
+  // --- Admin UID(s) ---
   window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
 
+  // --- Helpers ---
   const el = s => document.querySelector(s);
   const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
 
-  const state = { user: null, isAdmin: false, weekId: "2025-Week-01", lock: false, picks: {}, games: [] };
+  const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[] };
 
-  // ---------- AUTH BUTTONS ----------
-  el("#signInBtn").addEventListener("click", async () => {
+  // --- Auth UI ---
+  el("#signInBtn").onclick = async () => {
     const email = el("#email").value.trim();
     const pass  = el("#pass").value;
-    try { await signInWithEmailAndPassword(auth, email, pass); }
-    catch (e) { alert(e.message); }
-  });
-
-  el("#registerBtn").addEventListener("click", async () => {
+    try { await signInWithEmailAndPassword(auth, email, pass); } catch(e){ alert(e.message); }
+  };
+  el("#registerBtn").onclick = async () => {
     const email = el("#email").value.trim();
     const pass  = el("#pass").value;
-    try { await createUserWithEmailAndPassword(auth, email, pass); }
-    catch (e) { alert(e.message); }
-  });
+    try { await createUserWithEmailAndPassword(auth, email, pass); } catch(e){ alert(e.message); }
+  };
 
-  // ---------- AUTH STATE ----------
   onAuthStateChanged(auth, async (user) => {
     state.user = user || null;
 
     if (!user){
-      el("#auth").style.display = "block";
-      el("#app").style.display  = "none";
-      el("#userBox").innerHTML  = "";
-      document.body.classList.remove("is-admin");
+      el("#auth").style.display="block";
+      el("#app").style.display="none";
+      el("#userBox").innerHTML="";
       return;
     }
 
     el("#userBox").innerHTML = `<span class="pill">${user.email}</span> <button id="signOutBtn">Sign out</button>`;
-    el("#signOutBtn").addEventListener("click", () => signOut(auth));
+    el("#signOutBtn").onclick = async () => { try { await signOut(auth); } finally { location.reload(); } };
 
-    state.isAdmin = (window.ADMIN_UIDS || []).includes(user.uid);
-    document.body.classList.toggle("is-admin", state.isAdmin);
+    state.isAdmin = (window.ADMIN_UIDS||[]).includes(user.uid);
+    el("#adminBadge").style.display    = state.isAdmin ? "" : "none";
+    el("#finalizeWrap").style.display  = state.isAdmin ? "" : "none";
+    el("#adminToolbar").style.display  = state.isAdmin ? "" : "none";
 
-    el("#auth").style.display = "none";
-    el("#app").style.display  = "block";
+    el("#auth").style.display="none";
+    el("#app").style.display ="block";
 
     await setupWeeks();
     await subscribeWeek();
   });
 
-  // ---------- WEEKS ----------
   async function setupWeeks(){
-    const sel = el("#weekSelect"); sel.innerHTML = "";
+    const sel = el("#weekSelect"); sel.innerHTML="";
     for (let i=1;i<=18;i++){
       const id = `2025-Week-${String(i).padStart(2,"0")}`;
       const o = document.createElement("option");
-      o.value = id; o.textContent = `Week ${i}`;
+      o.value=id; o.textContent=`Week ${i}`;
       sel.appendChild(o);
     }
     sel.value = state.weekId;
@@ -189,89 +184,109 @@
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
 
-    // Finalize (lock) doc
+    // Lock meta
     const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
     unsubLock = onSnapshot(lockRef, s => {
       state.lock = s.exists() ? !!s.data().locked : false;
       el("#lockBadge").textContent = state.lock ? "Finalized" : "Open";
-      el("#lockBadge").className = "lock " + (state.lock ? "danger" : "muted");
+      el("#lockBadge").className   = "lock " + (state.lock ? "danger" : "muted");
       el("#adminWeekLock").checked = state.lock;
       renderGames();
-    });
-    el("#adminWeekLock").onchange = async e => {
+    }, e => console.error("lock listener", e));
+    el("#adminWeekLock").onchange = async (e) => {
       if (!state.isAdmin) return;
       await setDoc(lockRef, { locked: e.target.checked }, { merge:true });
     };
 
     // Games
     const gamesCol = collection(db, "weeks", state.weekId, "games");
+    // We still order by createdAt for deterministic stream; UI will sort by kickoffTs below
     unsubGames = onSnapshot(query(gamesCol, orderBy("createdAt","asc")), snap => {
-      state.games = []; snap.forEach(d => state.games.push({ id: d.id, ...d.data() }));
+      state.games = []; snap.forEach(d => state.games.push({ id:d.id, ...d.data() }));
       el("#noGames").style.display = state.games.length ? "none" : "";
       renderGames();
-    });
+    }, e => console.error("games listener", e));
 
-    // Your picks
+    // My picks
     const picksRef = doc(db, "picks", state.user.uid, "weeks", state.weekId);
     unsubMyPicks = onSnapshot(picksRef, snap => {
-      state.picks = snap.exists() ? (snap.data().picks || {}) : {};
+      state.picks = snap.exists() ? (snap.data().picks||{}) : {};
       renderGames();
-    });
+    }, e => console.error("picks listener", e));
+
+    // Admin UI wiring
+    el("#addGameBtn").onclick = () => {
+      const p = el("#adminAddPanel");
+      p.style.display = (p.style.display==="none" || !p.style.display) ? "" : "none";
+    };
+    el("#saveGameBtn").onclick = saveGame;
+    el("#clearGamesBtn").onclick = clearGames;
   }
 
-  // ---------- RENDER ----------
+  // --- Rendering (group by day, sort by kickoffTs) ---
   function renderGames(){
-    const list = el("#gameList"); list.innerHTML = "";
+    const list = el("#gameList"); list.innerHTML="";
 
-    // Group by day
-    const order = ["Thursday", "Friday", "Saturday", "Sunday", "Monday"];
-    const groups = { Thursday: [], Friday: [], Saturday: [], Sunday: [], Monday: [], Unknown: [] };
-    (state.games || []).forEach(g => (groups[g.day || "Unknown"] || groups.Unknown).push(g));
+    const orderDays = ["Thursday","Friday","Saturday","Sunday","Monday"];
+    const groups = Object.fromEntries([...orderDays, "Unknown"].map(d => [d, []]));
 
-    const renderRow = (g) => {
+    (state.games||[]).forEach(g => {
+      const day = g.day || "Unknown";
+      (groups[day] ?? groups.Unknown).push(g);
+    });
+
+    const sortByKick = (a,b) => {
+      const at = (typeof a.kickoffTs === "number") ? a.kickoffTs : Number.MAX_SAFE_INTEGER;
+      const bt = (typeof b.kickoffTs === "number") ? b.kickoffTs : Number.MAX_SAFE_INTEGER;
+      if (at !== bt) return at - bt;
+      const ac = a.createdAt||0, bc = b.createdAt||0;
+      return ac - bc;
+    };
+    const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+
+    const rowFor = (g) => {
       const row  = document.createElement("div"); row.className="match grid";
       const home = document.createElement("button"); home.className="team"; home.textContent=g.home;
-      const vs   = Object.assign(document.createElement("div"), {innerHTML:'<span class="muted">vs</span>', style:"text-align:center"});
+      const vs   = document.createElement("div"); vs.style.textAlign="center";
       const away = document.createElement("button"); away.className="team"; away.textContent=g.away;
+
+      if (typeof g.kickoffTs === "number") vs.innerHTML = `<span class="muted">vs<br><small>${fmtTime(g.kickoffTs)}</small></span>`;
+      else vs.innerHTML = `<span class="muted">vs</span>`;
 
       if (state.picks[g.id]==="home") home.classList.add("winner");
       if (state.picks[g.id]==="away") away.classList.add("winner");
+
       if (state.lock && !state.isAdmin){ home.classList.add("disabled"); away.classList.add("disabled"); }
 
       home.onclick = () => choose(g.id,"home");
       away.onclick = () => choose(g.id,"away");
 
       row.appendChild(home); row.appendChild(vs); row.appendChild(away);
-      list.appendChild(row);
+      return row;
     };
 
     let any=false;
-    order.forEach(day => {
+    for (const day of orderDays){
       const games = groups[day];
-      if (!games.length) return;
-      const h = document.createElement("h2"); h.className = "day"; h.textContent = day;
+      if (!games.length) continue;
+      games.sort(sortByKick);
+      const h = document.createElement("h2"); h.className="day"; h.textContent = day;
       list.appendChild(h);
-      games.forEach(renderRow);
-      any=true;
-    });
-    if (groups.Unknown.length){
-      const h = document.createElement("h2"); h.className = "day"; h.textContent = "Other";
-      list.appendChild(h);
-      groups.Unknown.forEach(renderRow);
-      any=true;
+      games.forEach(g => list.appendChild(rowFor(g)));
+      any = true;
     }
-
-    // admin panel wiring
-    el("#addGameBtn").onclick = () => {
-      const p = el("#adminAddPanel");
-      p.style.display = (p.style.display === "none" || !p.style.display) ? "" : "none";
-    };
-    el("#saveGameBtn").onclick = saveGame;
-    el("#clearGamesBtn").onclick = clearGames;
+    if (groups.Unknown.length){
+      groups.Unknown.sort(sortByKick);
+      const h = document.createElement("h2"); h.className="day"; h.textContent = "Other";
+      list.appendChild(h);
+      groups.Unknown.forEach(g => list.appendChild(rowFor(g)));
+      any = true;
+    }
 
     el("#noGames").style.display = any ? "none" : "";
   }
 
+  // --- Actions ---
   async function choose(gameId, side){
     if (state.lock && !state.isAdmin) return;
     state.picks[gameId] = side;
@@ -286,41 +301,50 @@
     const day  = (el("#gameDay")?.value || "Sunday").trim();
     const home = el("#homeTeam").value.trim();
     const away = el("#awayTeam").value.trim();
+    const raw  = el("#kickoff")?.value || ""; // yyyy-mm-ddThh:mm
+    const kickoffTs = raw ? Date.parse(raw) : null;
+
     if (!home || !away) return alert("Enter both team names.");
-    await addDoc(collection(db, "weeks", state.weekId, "games"), { day, home, away, createdAt: Date.now() });
-    el("#homeTeam").value=""; el("#awayTeam").value="";
+
+    await addDoc(collection(db, "weeks", state.weekId, "games"), {
+      day, home, away, createdAt: Date.now(), ...(kickoffTs ? { kickoffTs } : {})
+    });
+
+    el("#homeTeam").value=""; el("#awayTeam").value=""; if (el("#kickoff")) el("#kickoff").value="";
     toast("Game added");
-    renderGames();
   }
 
-  // ---------- Admin helpers ----------
-  window.clearGames = async function(){
+  async function clearGames(){
     if (!state.isAdmin){ console.warn("Admin only"); return; }
     const colRef = collection(db, "weeks", state.weekId, "games");
     const snap = await getDocs(colRef);
     let n=0; for (const d of snap.docs){ await deleteDoc(d.ref); n++; }
-    console.log("Cleared", n, "games for", state.weekId); toast("Cleared " + n + " games");
-    renderGames();
-  };
+    console.log("Cleared", n, "games for", state.weekId);
+    toast("Cleared " + n + " games");
+  }
 
-  window.seedWeek1 = async function(items){
+  // --- Seeder that stores kickoffTs from ISO string (kickoff) ---
+  async function seedWeek1(items){
     if (!state.isAdmin){ console.warn("Admin only"); return; }
-    const col = collection(db,"weeks",state.weekId,"games");
+    const col = collection(db, "weeks", state.weekId, "games");
+    let n=0;
     for (const item of items){
-      if (typeof item === "string"){
-        const [home, away] = item.split(" vs ").map(s => s.trim());
-        if (home && away) await addDoc(col, { day: "Sunday", home, away, createdAt: Date.now() });
-      } else if (item && item.home && item.away){
-        await addDoc(col, { day: item.day || "Sunday", home: item.home, away: item.away, createdAt: Date.now() });
-      }
+      const day = item.day || "Sunday";
+      const home = item.home?.trim(); const away = item.away?.trim();
+      const kickoffTs = item.kickoff ? Date.parse(item.kickoff) : (typeof item.kickoffTs==="number" ? item.kickoffTs : null);
+      if (!home || !away) continue;
+      await addDoc(col, { day, home, away, createdAt: Date.now(), ...(kickoffTs ? { kickoffTs } : {}) });
+      n++;
     }
-    toast("Seeded " + items.length + " games");
-  };
+    console.log("Seeded", n, "games into", state.weekId);
+  }
 
-  // quick debug
-  window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
+  // --- Expose helpers for console ---
   window.appState = state;
   window.fx = { seedWeek1, clearGames, addDoc, collection };
+
+  // Handy debug
+  window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
 </script>
 </body>
 </html>
