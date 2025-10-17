@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>NFL Picks — Week Importer</title>
+<style>
+  :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:980px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:12px}
+  input,button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:10px;border-radius:10px}
+  button.primary{outline:2px solid var(--accent)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .muted{color:var(--muted)}
+  .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
+  pre{white-space:pre-wrap;background:#0b0d11;border:1px solid var(--border);padding:10px;border-radius:8px;max-height:260px;overflow:auto}
+  .ok{color:#86f5b2} .bad{color:#ff9a9a}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row" style="justify-content:space-between">
+    <h1 style="margin:0">Week Importer</h1>
+    <a class="pill" href="index.html">← Back to App</a>
+  </div>
+
+  <div id="auth" class="card">
+    <div class="row">
+      <input id="email" type="email" placeholder="Email"/>
+      <input id="pass" type="password" placeholder="Password"/>
+      <button id="signInBtn" class="primary">Sign in</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Admins only. Upload a single CSV with header: <code>weekId,day,kickoff,home,away,winner,...users</code></div>
+  </div>
+
+  <div id="app" class="card" style="display:none">
+    <div class="row">
+      <span class="pill" id="userTag"></span>
+      <span class="pill" id="adminTag" style="display:none">ADMIN</span>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <input id="file" type="file" accept=".csv"/>
+        <button id="previewBtn">Preview</button>
+        <button id="importBtn" class="primary">Import</button>
+      </div>
+      <div class="muted" style="margin-top:6px">CSV format: weekId, day, kickoff, home, away, winner, then one column per user email. Picks use <code>home</code> or <code>away</code>.</div>
+    </div>
+
+    <div class="card">
+      <strong>Preview</strong>
+      <pre id="preview">No file yet.</pre>
+    </div>
+
+    <div class="card">
+      <strong>Log</strong>
+      <pre id="log"></pre>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import {
+    getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import {
+    initializeFirestore, getFirestore, doc, setDoc, getDoc, collection, writeBatch, Timestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+  // -- same config as index.html --
+  const firebaseConfig = {
+    apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+    authDomain: "nfl-picks-b83c2.firebaseapp.com",
+    projectId: "nfl-picks-b83c2",
+    storageBucket: "nfl-picks-b83c2.appspot.com",
+    messagingSenderId: "802058909501",
+    appId: "1:802058909501:web:bb935c188891934de07754",
+    measurementId: "G-MSJHYZ4VG2"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  // -- use same admin list as your index.html --
+  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // keep in sync with index.html (admin badge/powers) :contentReference[oaicite:9]{index=9}
+
+  // UI helpers
+  const el = s => document.querySelector(s);
+  const log = (...args) => { el("#log").textContent += args.join(" ") + "\\n"; };
+  const show = (id, vis) => el(id).style.display = vis ? "" : "none";
+
+  onAuthStateChanged(auth, (user) => {
+    if (!user) { show("#auth", true); show("#app", false); return; }
+    const isAdmin = ADMIN_UIDS.includes(user.uid);
+    el("#userTag").textContent = user.email;
+    show("#adminTag", isAdmin);
+    show("#auth", false); show("#app", true);
+    if (!isAdmin) { alert("Admins only."); signOut(auth); }
+  });
+
+  el("#signInBtn").onclick = async () => {
+    const email = el("#email").value.trim();
+    const pass  = el("#pass").value;
+    try { await signInWithEmailAndPassword(auth, email, pass); }
+    catch (e) { alert(e.message); }
+  };
+
+  // --- CSV parsing ---
+  function parseCSV(text){
+    // minimal CSV parser (handles commas, simple quotes)
+    const rows = [];
+    let i=0, cur="", inQ=false; const push=()=>{ row.push(cur); cur=""; };
+    let row=[];
+    while(i<text.length){
+      const c=text[i++];
+      if (c === '"'){ if (inQ && text[i] === '"'){ cur+='"'; i++; } else inQ=!inQ; continue; }
+      if (!inQ && (c === ',')){ push(); continue; }
+      if (!inQ && (c === '\\n' || c === '\\r')){ if (cur!=="" || row.length){ push(); rows.push(row); row=[]; } continue; }
+      cur+=c;
+    }
+    if (cur!=="" || row.length){ push(); rows.push(row); }
+    // trim trailing empty rows
+    return rows.filter(r => r.some(x => (x||"").trim() !== ""));
+  }
+
+  // --- Utilities ---
+  const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  function makeGameId(home, away, kickoffTs){
+    return `${slug(home)}__${slug(away)}__${kickoffTs||"na"}`;
+  }
+
+  // Build user UID from email (stable key for picks collection path)
+  const uidFromEmail = email => slug(email).slice(0,64);
+
+  // --- Preview ---
+  el("#previewBtn").onclick = async () => {
+    const f = el("#file").files?.[0];
+    if (!f) { alert("Choose a CSV first."); return; }
+    const text = await f.text();
+    const rows = parseCSV(text);
+    if (rows.length < 2) { alert("CSV appears empty."); return; }
+    const head = rows[0];
+    const sample = rows.slice(1, Math.min(rows.length, 6));
+    el("#preview").textContent = [head.join(" , "), ...sample.map(r => r.join(" , "))].join("\\n");
+  };
+
+  // --- Import ---
+  el("#importBtn").onclick = async () => {
+    const f = el("#file").files?.[0];
+    if (!f) { alert("Choose a CSV first."); return; }
+    const text = await f.text();
+    const rows = parseCSV(text);
+    if (rows.length < 2) { alert("No data rows found."); return; }
+
+    const headers = rows[0].map(h => h.trim());
+    const fixed = ["weekId","day","kickoff","home","away","winner"];
+    for (let i=0;i<fixed.length;i++){
+      if ((headers[i]||"").toLowerCase() !== fixed[i].toLowerCase()){
+        alert("Expected first 6 columns: " + fixed.join(", "));
+        return;
+      }
+    }
+
+    const userCols = headers.slice(6); // emails
+    if (!userCols.length){ alert("No user columns found (after the first 6 headers)."); return; }
+
+    log("Users:", userCols.join(", "));
+
+    const perUserPicks = new Map(); // email -> { [weekId]: { picks: {gameId:side}, email, weekId } }
+    const gameBatch = writeBatch(db);
+
+    let gameCount=0, pickCells=0;
+    for (let r=1;r<rows.length;r++){
+      const row = rows[r];
+      if (!row || !row.length) continue;
+
+      const [weekId, day, kickoff, home, away, winner] = row.slice(0,6).map(x => (x||"").trim());
+      if (!weekId || !home || !away) { log("Skip row", r+1, "(missing week/home/away)"); continue; }
+
+      const kickoffTs = kickoff ? Date.parse(kickoff) : null;
+      const gameId = makeGameId(home, away, kickoffTs);
+      const gameRef = doc(db, "weeks", weekId, "games", gameId);
+      const gameDoc = {
+        day: day || "Sunday",
+        home, away,
+        createdAt: Date.now(),
+        ...(kickoffTs ? { kickoffTs } : {}),
+        ...(winner === "home" || winner === "away" ? { winner } : {})
+      };
+      gameBatch.set(gameRef, gameDoc, { merge:true });
+      gameCount++;
+
+      // Picks per user across columns
+      for (let u=0; u<userCols.length; u++){
+        const email = (userCols[u]||"").trim();
+        if (!email) continue;
+        const side = (row[6+u]||"").trim().toLowerCase();
+        if (side !== "home" && side !== "away") continue; // ignore blanks/invalid
+        const uid = uidFromEmail(email);
+        const key = email.toLowerCase();
+
+        if (!perUserPicks.has(key)){
+          perUserPicks.set(key, { email, weeks:new Map() });
+        }
+        const rec = perUserPicks.get(key);
+        if (!rec.weeks.has(weekId)){
+          rec.weeks.set(weekId, { email, weekId, picks:{} });
+        }
+        rec.weeks.get(weekId).picks[gameId] = side;
+        pickCells++;
+      }
+    }
+
+    log("Writing games:", gameCount);
+    await gameBatch.commit();
+
+    // Write picks docs per user/week
+    let pickDocs=0;
+    for (const { email, weeks } of perUserPicks.values()){
+      for (const [weekId, data] of weeks){
+        const uid = uidFromEmail(email);
+        const ref = doc(db, "picks", uid, "weeks", weekId);
+        await setDoc(ref, {
+          email, weekId, picks: data.picks, updatedAt: Date.now()
+        }, { merge:true });
+        pickDocs++;
+      }
+    }
+
+    log("Done. Games upserted:", gameCount, "| picks cells processed:", pickCells, "| picks docs written:", pickDocs);
+
+    // Optional: set auto lockAt based on earliest kickoff for that week (same idea you use today)
+    // You can calculate per week here and write weeks/{weekId}/meta/lock.lockAt if you like.
+  };
+</script>
+</body>
+</html>
