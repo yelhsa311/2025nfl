@@ -213,6 +213,11 @@
 </div>
 
 <script type="module">
+  import {
+  initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp,
+  onSnapshot, collection, addDoc, query, orderBy, where, collectionGroup
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword,
@@ -223,12 +228,6 @@
     onSnapshot, collection, addDoc, query, orderBy 
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
   import { collectionGroup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
-  import {
-    initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp,
-    onSnapshot, collection, addDoc, query, orderBy, where, collectionGroup
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
   
   // --- Firebase config (yours) ---
   const firebaseConfig = {
@@ -604,26 +603,61 @@
   }
 
   async function computeWeekStandings(){
-    try{
-      // Build winners map for current week
-      const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-      const winners = {}; let totalGames=0;
-      gamesSnap.forEach(d => { const g=d.data(); if (g.winner==="home"||g.winner==="away"){ winners[d.id]=g.winner; totalGames++; } });
+  try{
+    // Winners for THIS week
+    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+    const winners = {};
+    let totalGames = 0;
+    gamesSnap.forEach(d => {
+      const g = d.data();
+      if (g.winner === "home" || g.winner === "away") {
+        winners[d.id] = g.winner;
+        totalGames++;
+      }
+    });
 
-      // Pull all users' picks for this week via collectionGroup
-      const cg = await getDocs(query(collectionGroup(db, "weeks"),));
-      const rows = [];
-      cg.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.weekId !== state.weekId) return; // only this week
-        const picks = data.picks || {}; const email = data.email || docSnap.ref.path.split("/")[1];
-        let wins=0, played=0;
-        for (const [gameId, side] of Object.entries(picks)){
-          const w = winners[gameId]; if (!w) continue; played++;
-          if (w === side) wins++;
-        }
-        rows.push({ email, wins, played });
-      });
+    // All picks docs for THIS week only
+    const picksQ = query(collectionGroup(db, "weeks"), where("weekId", "==", state.weekId));
+    const picksSnap = await getDocs(picksQ);
+
+    // Aggregate by email (dedupe)
+    const rowsByEmail = new Map(); // emailLower -> { email, wins, played }
+    picksSnap.forEach(docSnap => {
+      const data = docSnap.data();
+      const email = (data.email || "").trim();
+      if (!email) return; // skip if missing email
+
+      const picks = data.picks || {};
+      let wins = 0, played = 0;
+
+      // count only games with winners set
+      for (const [gameId, side] of Object.entries(picks)) {
+        const w = winners[gameId];
+        if (!w) continue; // game not decided
+        played++;
+        if (w === side) wins++;
+      }
+
+      const key = email.toLowerCase();
+      const curr = rowsByEmail.get(key);
+      if (!curr) {
+        rowsByEmail.set(key, { email, wins, played });
+      } else {
+        // If multiple docs exist for the same email, merge (sum)
+        curr.wins += wins;
+        curr.played += played;
+      }
+    });
+
+    const rows = Array.from(rowsByEmail.values());
+    rows.sort((a,b) => b.wins - a.wins || a.email.localeCompare(b.email));
+    renderStandingsTable(rows, totalGames);
+  }catch(e){
+    console.error("standings error", e);
+    el("#standingsBody").innerHTML = `<div class="muted">Unable to compute standings (${e.message}).</div>`;
+  }
+}
+
 
       rows.sort((a,b)=> b.wins - a.wins || a.email.localeCompare(b.email));
       renderStandingsTable(rows, totalGames);
