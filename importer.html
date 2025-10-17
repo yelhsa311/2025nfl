@@ -111,43 +111,66 @@
   };
 
   // --- CSV parsing ---
-  function parseCSV(text){
-    // minimal CSV parser (handles commas, simple quotes)
+  function parseCSV(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+    text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n"); // normalize CRLF/CR
+    const first = (text.split("\n").find(l => l.trim().length) || "");
+    const candidates = [",", ";", "\t"];
+    let delim = ",", best = -1;
+    for (const d of candidates) {
+      let count = 0, q = false;
+      for (let i=0;i<first.length;i++){
+        const c = first[i];
+        if (c === '"'){ if (q && first[i+1]==='"'){i++;} else q=!q; }
+        else if (!q && c===d) count++;
+      }
+      if (count>best){ best=count; delim=d; }
+    }
     const rows = [];
-    let i=0, cur="", inQ=false; const push=()=>{ row.push(cur); cur=""; };
-    let row=[];
-    while(i<text.length){
-      const c=text[i++];
-      if (c === '"'){ if (inQ && text[i] === '"'){ cur+='"'; i++; } else inQ=!inQ; continue; }
-      if (!inQ && (c === ',')){ push(); continue; }
-      if (!inQ && (c === '\\n' || c === '\\r')){ if (cur!=="" || row.length){ push(); rows.push(row); row=[]; } continue; }
+    let row=[], cur="", inQ=false;
+    const push=()=>{row.push(cur);cur="";};
+    const pushRow=()=>{rows.push(row);row=[];};
+    for (let i=0;i<text.length;i++){
+      const c=text[i];
+      if (c === '"'){ if(inQ && text[i+1]==='"'){cur+='"';i++;} else inQ=!inQ; continue; }
+      if (!inQ && c===delim){push();continue;}
+      if (!inQ && c==="\n"){push();pushRow();continue;}
       cur+=c;
     }
-    if (cur!=="" || row.length){ push(); rows.push(row); }
-    // trim trailing empty rows
-    return rows.filter(r => r.some(x => (x||"").trim() !== ""));
+    if (cur.length||row.length){push();pushRow();}
+    return rows.filter(r=>r.some(x=>(x??"").trim()!==""));
   }
 
-  // --- Utilities ---
-  const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-  function makeGameId(home, away, kickoffTs){
-    return `${slug(home)}__${slug(away)}__${kickoffTs||"na"}`;
-  }
 
   // Build user UID from email (stable key for picks collection path)
   const uidFromEmail = email => slug(email).slice(0,64);
 
   // --- Preview ---
+  function debugCSVText(t){
+    const head = t.slice(0, 200).split("\n")[0];
+    const codes = Array.from(head).slice(0, 20).map(ch => ch.charCodeAt(0));
+    const lines = t.split(/\r\n|\r|\n/).length;
+    el("#preview").textContent =
+      "First line (200 chars max):\n" + head +
+      "\n\nChar codes of first 20 chars:\n" + codes.join(", ") +
+      "\n\nApprox line count: " + lines;
+  }
+
   el("#previewBtn").onclick = async () => {
     const f = el("#file").files?.[0];
     if (!f) { alert("Choose a CSV first."); return; }
     const text = await f.text();
+    debugCSVText(text); // show raw peek
+  
     const rows = parseCSV(text);
-    if (rows.length < 2) { alert("CSV appears empty."); return; }
+    if (!rows.length) { alert("Parser produced 0 rows"); return; }
     const head = rows[0];
     const sample = rows.slice(1, Math.min(rows.length, 6));
-    el("#preview").textContent = [head.join(" , "), ...sample.map(r => r.join(" , "))].join("\\n");
+    el("#preview").textContent +=
+      "\n\n--- Parsed Preview ---\n" +
+      [head.join(" , "), ...sample.map(r => r.join(" , "))].join("\n");
   };
+
 
   // --- Import ---
   el("#importBtn").onclick = async () => {
