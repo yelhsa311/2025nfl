@@ -18,262 +18,168 @@
   .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
   .muted{color:var(--muted)}
   pre{white-space:pre-wrap;background:#0b0d11;border:1px solid var(--border);padding:10px;border-radius:8px;max-height:260px;overflow:auto}
-  .ok{color:#86f5b2} .bad{color:#ff9a9a}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="row" style="justify-content:space-between">
-    <h1 style="margin:0">Week Importer</h1>
+    <h1>Week Importer</h1>
     <a class="pill" href="index.html">← Back to App</a>
   </div>
 
-  <!-- AUTH -->
+  <!-- LOGIN -->
   <div id="auth" class="card">
     <div class="row">
-      <input id="email" type="email" placeholder="Email"/>
-      <input id="pass" type="password" placeholder="Password"/>
+      <input id="email" type="email" placeholder="Email">
+      <input id="pass" type="password" placeholder="Password">
       <button id="signInBtn" class="primary">Sign in</button>
     </div>
-    <div class="muted" style="margin-top:6px">
-      Admins only. Upload a CSV with header:
+    <div class="muted">Admins only. Upload a CSV with:
       <code>weekId,day,kickoff,home,away,winner,&lt;user1@email&gt;,...</code>
-      — picks use <code>home</code> or <code>away</code>.
     </div>
   </div>
 
   <!-- APP -->
   <div id="app" class="card" style="display:none">
     <div class="row">
-      <span class="pill" id="userTag"></span>
-      <span class="pill" id="adminTag" style="display:none">ADMIN</span>
+      <span id="userTag" class="pill"></span>
+      <span id="adminTag" class="pill" style="display:none">ADMIN</span>
     </div>
 
     <div class="card">
       <div class="row">
-        <input id="file" type="file" accept=".csv"/>
+        <input id="file" type="file" accept=".csv">
         <button id="previewBtn">Preview</button>
         <button id="importBtn" class="primary">Import</button>
         <button id="permBtn">Test Permissions</button>
       </div>
-      <div class="muted" style="margin-top:6px">
-        CSV format: <code>weekId, day, kickoff, home, away, winner</code>, then one column per user email.
-        Time can be <code>YYYY-MM-DDTHH:mm</code> or <code>YYYY-MM-DD HH:mm</code>.
-      </div>
+      <div class="muted">Time format: <code>YYYY-MM-DDTHH:mm</code> or <code>YYYY-MM-DD HH:mm</code></div>
     </div>
 
-    <div class="card">
-      <strong>Preview</strong>
-      <pre id="preview">No file yet.</pre>
-    </div>
-
-    <div class="card">
-      <strong>Log</strong>
-      <pre id="log"></pre>
-    </div>
+    <div class="card"><strong>Preview</strong><pre id="preview">No file yet.</pre></div>
+    <div class="card"><strong>Log</strong><pre id="log"></pre></div>
   </div>
 </div>
 
 <script type="module">
-  // --- Diagnostics (logs runtime issues)
-  window.addEventListener("error", (e) => {
-    const msg = (e?.error && e.error.stack) ? e.error.stack : (e?.message || String(e));
-    const box = document.querySelector("#log");
-    if (box) box.textContent += "❌ Window error: " + msg + "\n";
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    const msg = e?.reason?.message || e?.reason || "unhandled rejection";
-    const box = document.querySelector("#log");
-    if (box) box.textContent += "❌ Promise rejection: " + msg + "\n";
-  });
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { getFirestore, doc, setDoc, writeBatch, getDocs, collection } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // --- Firebase setup ---
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import {
-    getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import {
-    initializeFirestore, getFirestore, doc, setDoc, writeBatch
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+const firebaseConfig = {
+  apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+  authDomain: "nfl-picks-b83c2.firebaseapp.com",
+  projectId: "nfl-picks-b83c2",
+  storageBucket: "nfl-picks-b83c2.appspot.com",
+  messagingSenderId: "802058909501",
+  appId: "1:802058909501:web:bb935c188891934de07754"
+};
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
-    authDomain: "nfl-picks-b83c2.firebaseapp.com",
-    projectId: "nfl-picks-b83c2",
-    storageBucket: "nfl-picks-b83c2.appspot.com",
-    messagingSenderId: "802058909501",
-    appId: "1:802058909501:web:bb935c188891934de07754",
-    measurementId: "G-MSJHYZ4VG2"
-  };
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
 
-  const app = initializeApp(firebaseConfig);
-  initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
-  const auth = getAuth(app);
-  const db = getFirestore(app);
+const el = s => document.querySelector(s);
+const log = (...a) => el("#log").textContent += a.join(" ") + "\n";
 
-  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
+// --- sanitize helper ---
+const clean = s => (s ?? "").trim().replace(/^[\uFEFF\u200B\u00A0]+|[\uFEFF\u200B\u00A0]+$/g, "").replace(/^"+|"+$/g,"");
 
-  const el = s => document.querySelector(s);
-  const log = (...a) => { el("#log").textContent += a.join(" ") + "\n"; };
-
-  // --- CSV Parser ---
-  function parseCSV(text) {
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const first = (text.split("\n").find(l => l.trim().length) || "");
-    const delim = [",",";","\t"].reduce((best, d) =>
-      (first.split(d).length > first.split(best).length ? d : best), ",");
-    const rows = text.split("\n").map(l => l.split(delim).map(x => x.trim()));
-    return rows.filter(r => r.some(x => x));
+// --- CSV parser ---
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  text = text.replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+  const lines = [];
+  let inQ = false, cur = "", row = [];
+  for (let i=0;i<text.length;i++){
+    const c = text[i];
+    if (c === '"'){ if (inQ && text[i+1]==='"'){cur+='"';i++;} else inQ=!inQ; continue; }
+    if (!inQ && c === ","){ row.push(cur); cur=""; continue; }
+    if (!inQ && c === "\n"){ row.push(cur); lines.push(row); row=[]; cur=""; continue; }
+    cur += c;
   }
+  if (cur.length || row.length){ row.push(cur); lines.push(row); }
+  return lines.filter(r => r.some(x => (x ?? "").trim()!==""));
+}
 
-  // --- Auth ---
-  onAuthStateChanged(auth, (user) => {
-    if (!user) { el("#auth").style.display=""; el("#app").style.display="none"; return; }
-    const isAdmin = ADMIN_UIDS.includes(user.uid);
-    el("#userTag").textContent = user.email;
-    el("#adminTag").style.display = isAdmin ? "" : "none";
-    el("#auth").style.display="none"; el("#app").style.display="";
-    if (!isAdmin) { alert("Admins only."); signOut(auth); }
-  });
+// --- auth ---
+onAuthStateChanged(auth, (user)=>{
+  if(!user){ el("#auth").style.display=""; el("#app").style.display="none"; return; }
+  const isAdmin = ADMIN_UIDS.includes(user.uid);
+  el("#userTag").textContent = user.email;
+  el("#adminTag").style.display = isAdmin ? "" : "none";
+  el("#auth").style.display="none"; el("#app").style.display="";
+  if(!isAdmin){ alert("Admins only."); signOut(auth); }
+});
+el("#signInBtn").onclick = async ()=>{ try{ await signInWithEmailAndPassword(auth, el("#email").value, el("#pass").value); }catch(e){alert(e.message);} };
 
-  el("#signInBtn").onclick = async () => {
-    try {
-      await signInWithEmailAndPassword(auth, el("#email").value.trim(), el("#pass").value);
-    } catch (e) { alert(e.message); }
-  };
+el("#permBtn").onclick = async ()=>{
+  try{
+    await setDoc(doc(db,"weeks","TEST-WEEK","games","probe"),{ok:true,at:Date.now()},{merge:true});
+    log("✅ Permissions OK");
+  }catch(e){ log("❌ Perm FAIL:", e.message); alert(e.message); }
+};
 
-  // --- Test Permissions ---
-  document.querySelector("#permBtn").onclick = async () => {
-    try {
-      const probe = doc(db, "weeks", "TEST-WEEK", "games", "probe");
-      await setDoc(probe, { ok: true, at: Date.now() }, { merge: true });
-      log("✅ Permissions OK: could write to weeks/TEST-WEEK/games/probe");
-    } catch (e) {
-      log("❌ Permissions FAIL:", e.message || e);
-      alert("Firestore denied write: " + e.message);
-    }
-  };
+// --- preview ---
+el("#previewBtn").onclick = async ()=>{
+  const f = el("#file").files?.[0];
+  if(!f) return alert("Choose a CSV");
+  const t = await f.text();
+  const rows = parseCSV(t);
+  el("#preview").textContent = "First line:\n"+t.slice(0,200)+"\nLines:"+rows.length;
+};
 
-  // --- Preview ---
-  el("#previewBtn").onclick = async () => {
+// --- import ---
+el("#importBtn").onclick = async ()=>{
+  try{
     const f = el("#file").files?.[0];
-    if (!f) return alert("Choose a CSV first.");
+    if(!f) return alert("Choose a CSV");
     const text = await f.text();
     const rows = parseCSV(text);
-    el("#preview").textContent =
-      "First line (200 chars max):\n" + text.slice(0,200) +
-      "\n\nApprox line count: " + rows.length +
-      "\n\n--- Parsed Preview ---\n" +
-      rows.slice(0,6).map(r => r.join(" , ")).join("\n");
-  };
-
-// REPLACE your current importBtn handler with this one
-el("#importBtn").onclick = async () => {
-  const logBox = document.querySelector("#log");
-  const log = (...a) => { logBox.textContent += a.join(" ") + "\n"; };
-
-  // helpers used here
-  const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-  const uidFromEmail = email => slug(email).slice(0,64);
-  const makeGameId = (home, away, kickoffTs) => `${slug(home)}__${slug(away)}__${kickoffTs ?? "na"}`;
-
-  try {
-    const f = document.querySelector("#file").files?.[0];
-    if (!f) return alert("Choose a CSV first.");
-    const text = await f.text();
-    const rows = parseCSV(text);
-
-    if (rows.length < 2) { alert("No data rows found after parsing."); return; }
-
-    const headers = rows[0].map(h => (h || "").trim());
-    const fixed = ["weekId","day","kickoff","home","away","winner"];
-    for (let i=0;i<fixed.length;i++){
-      if ((headers[i] || "").toLowerCase() !== fixed[i]) {
-        alert(`Header ${i+1} mismatch. Expected ${fixed[i]}, got "${headers[i]}"`);
-        return;
-      }
+    const rawHeaders = rows[0].map(clean);
+    const headers = rawHeaders.map(h=>h.toLowerCase());
+    const fixed = ["weekid","day","kickoff","home","away","winner"];
+    for(let i=0;i<fixed.length;i++){
+      if(headers[i]!==fixed[i]) throw new Error(`Header ${i+1} mismatch: expected ${fixed[i]} got "${rawHeaders[i]}"`);
     }
-    const userCols = headers.slice(6).map(h => (h || "").trim()).filter(Boolean);
-    if (!userCols.length) { alert("No user columns after the first 6 headers."); return; }
-
-    log("Users:", userCols.join(", "));
-
-    // Build games batch and collect picks
-    const gameBatch = writeBatch(db);
-    const perUserPicks = new Map(); // email -> { weeks: Map(weekId -> {picks}) }
-    let gameCount = 0, pickCells = 0, badKickoffs = 0;
-
-    for (let r = 1; r < rows.length; r++) {
+    const userCols = rawHeaders.slice(6).map(clean).filter(Boolean);
+    log("Users:",userCols.join(","));
+    const batch = writeBatch(db);
+    const perUser = new Map();
+    let gameCount=0;
+    for(let r=1;r<rows.length;r++){
       const row = rows[r];
-      if (!row || !row.length) continue;
-
-      const [weekId, day, kickoff, home, away, winner] =
-        row.slice(0,6).map(x => (x || "").trim());
-
-      if (!weekId || !home || !away) { log(`⚠ skip row ${r+1} (missing week/home/away)`); continue; }
-
-      // parse kickoff
-      // support "YYYY-MM-DDTHH:mm" and "YYYY-MM-DD HH:mm" (seconds optional)
-      const k = kickoff.replace(" ", "T");
-      let ts = Date.parse(k);
-      if (!Number.isFinite(ts)) {
-        // try stripping seconds if present
-        const k2 = k.replace(/:([0-5]\d):([0-5]\d)$/, ":$1");
-        ts = Date.parse(k2);
+      const [weekId,day,kickoff,home,away,winner] = row.slice(0,6).map(clean);
+      if(!weekId||!home||!away) continue;
+      const ts = Date.parse(kickoff.replace(" ","T"));
+      const gameId = `${home.replaceAll(" ","_")}_vs_${away.replaceAll(" ","_")}`;
+      const gRef = doc(db,"weeks",weekId,"games",gameId);
+      batch.set(gRef,{day,home,away,createdAt:Date.now(),kickoffTs:ts||Date.now(),...(winner?{winner}:{})},{merge:true});
+      for(let u=0;u<userCols.length;u++){
+        const email=userCols[u]; const side=clean(row[6+u]||"").toLowerCase();
+        if(side!=="home"&&side!=="away") continue;
+        if(!perUser.has(email)) perUser.set(email,{weeks:new Map()});
+        if(!perUser.get(email).weeks.has(weekId)) perUser.get(email).weeks.set(weekId,{picks:{}});
+        perUser.get(email).weeks.get(weekId).picks[gameId]=side;
       }
-      if (!Number.isFinite(ts)) { badKickoffs++; ts = null; }
-
-      const gameId = makeGameId(home, away, ts);
-      const gameRef = doc(db, "weeks", weekId, "games", gameId);
-      const gameDoc = {
-        day: day || "Sunday",
-        home, away,
-        createdAt: Date.now(),
-        ...(ts ? { kickoffTs: ts } : {}),
-        ...(winner === "home" || winner === "away" ? { winner } : {})
-      };
-      gameBatch.set(gameRef, gameDoc, { merge: true });
       gameCount++;
-
-      // picks across user columns
-      for (let u = 0; u < userCols.length; u++){
-        const email = userCols[u];
-        const side = (row[6+u] || "").trim().toLowerCase();
-        if (side !== "home" && side !== "away") continue;
-
-        const key = email.toLowerCase();
-        if (!perUserPicks.has(key)) perUserPicks.set(key, { email, weeks: new Map() });
-        const rec = perUserPicks.get(key);
-        if (!rec.weeks.has(weekId)) rec.weeks.set(weekId, { email, weekId, picks: {} });
-        rec.weeks.get(weekId).picks[gameId] = side;
-        pickCells++;
-      }
     }
+    await batch.commit(); log("Games committed:",gameCount);
 
-    log("Writing games:", String(gameCount), badKickoffs ? `| kickoffTs missing in ${badKickoffs} row(s)` : "");
-    await gameBatch.commit();
-    log("Games batch committed.");
-
-    // Now write picks docs
-    let pickDocs = 0;
-    for (const { email, weeks } of perUserPicks.values()){
-      for (const [weekId, data] of weeks){
-        const uid = uidFromEmail(email);
-        const ref = doc(db, "picks", uid, "weeks", weekId);
-        await setDoc(ref, { email, weekId, picks: data.picks, updatedAt: Date.now() }, { merge:true });
+    // write picks
+    let pickDocs=0;
+    for(const [email,obj] of perUser){
+      for(const [weekId,data] of obj.weeks){
+        await setDoc(doc(db,"picks",email.toLowerCase(),"weeks",weekId),
+          {email,weekId,picks:data.picks,updatedAt:Date.now()},{merge:true});
         pickDocs++;
       }
     }
-    log("✅ Done. Games upserted:", String(gameCount), "| picks cells:", String(pickCells), "| picks docs:", String(pickDocs));
+    log(`✅ Done. Games:${gameCount} | Pick docs:${pickDocs}`);
     alert("Import complete!");
-  } catch (e) {
-    console.error(e);
-    log("❌ ERROR:", e?.message || String(e));
-    alert("Import error: " + (e?.message || e));
-  }
+  }catch(e){ log("❌ ERROR:",e.message); alert(e.message); }
 };
-
 </script>
 </body>
 </html>
