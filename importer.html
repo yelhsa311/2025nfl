@@ -54,6 +54,7 @@
         <input id="file" type="file" accept=".csv"/>
         <button id="previewBtn">Preview</button>
         <button id="importBtn" class="primary">Import</button>
+        <button id="permBtn">Test Permissions</button>
       </div>
       <div class="muted" style="margin-top:6px">
         CSV format: <code>weekId, day, kickoff, home, away, winner</code>, then one column per user email.
@@ -74,6 +75,17 @@
 </div>
 
 <script type="module">
+  window.addEventListener("error", (e) => {
+    const msg = (e?.error && e.error.stack) ? e.error.stack : (e?.message || String(e));
+    const box = document.querySelector("#log");
+    if (box) box.textContent += "❌ Window error: " + msg + "\n";
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    const msg = e?.reason?.message || e?.reason || "unhandled rejection";
+    const box = document.querySelector("#log");
+    if (box) box.textContent += "❌ Promise rejection: " + msg + "\n";
+  });
+
   // --- Firebase
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import {
@@ -98,6 +110,19 @@
   initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
   const auth = getAuth(app);
   const db = getFirestore(app);
+
+  document.querySelector("#permBtn").onclick = async () => {
+    try {
+      const probe = doc(db, "weeks", "TEST-WEEK", "games", "probe");
+      await setDoc(probe, { ok: true, at: Date.now() }, { merge: true });
+      const box = document.querySelector("#log");
+      box.textContent += "✅ Permissions OK: could write to weeks/TEST-WEEK/games/probe\n";
+    } catch (e) {
+      const box = document.querySelector("#log");
+      box.textContent += "❌ Permissions FAIL: " + (e.message || e) + "\n";
+      alert("Firestore denied a write.\nIf you see 'permission-denied', rules need a tweak.");
+    }
+  };
 
   // Keep in sync with index.html
   const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
