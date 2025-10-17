@@ -168,60 +168,112 @@
       rows.slice(0,6).map(r => r.join(" , ")).join("\n");
   };
 
-  // --- Import (debug-enhanced) ---
-  el("#importBtn").onclick = async () => {
-    const logBox = document.querySelector("#log");
-    const log = (...a) => { logBox.textContent += a.join(" ") + "\n"; };
+// REPLACE your current importBtn handler with this one
+el("#importBtn").onclick = async () => {
+  const logBox = document.querySelector("#log");
+  const log = (...a) => { logBox.textContent += a.join(" ") + "\n"; };
 
-    try {
-      const f = document.querySelector("#file").files?.[0];
-      if (!f) return alert("Choose a CSV first.");
-      const text = await f.text();
-      log("Raw file length:", text.length);
+  // helpers used here
+  const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  const uidFromEmail = email => slug(email).slice(0,64);
+  const makeGameId = (home, away, kickoffTs) => `${slug(home)}__${slug(away)}__${kickoffTs ?? "na"}`;
 
-      const rows = parseCSV(text);
-      log("Rows parsed:", rows.length);
-      if (rows.length < 2) throw new Error("No data rows found after parsing.");
+  try {
+    const f = document.querySelector("#file").files?.[0];
+    if (!f) return alert("Choose a CSV first.");
+    const text = await f.text();
+    const rows = parseCSV(text);
 
-      const headers = rows[0].map(h => (h || "").trim());
-      log("Headers:", headers.join(", "));
+    if (rows.length < 2) { alert("No data rows found after parsing."); return; }
 
-      const userCols = headers.slice(6).map(h => (h || "").trim()).filter(Boolean);
-      log("User columns:", userCols.join(", "));
-
-      const gameBatch = writeBatch(db);
-      let gameCount = 0;
-
-      for (let r = 1; r < rows.length; r++) {
-        const row = rows[r];
-        if (!row || !row.length) continue;
-        const [weekId, day, kickoff, home, away, winner] = row.slice(0,6).map(x => (x || "").trim());
-        if (!weekId || !home || !away) continue;
-
-        const kickoffStr = kickoff.replace(" ", "T");
-        const ts = Date.parse(kickoffStr);
-        const gameId = `${home.replaceAll(" ","_")}_vs_${away.replaceAll(" ","_")}`;
-        const gameRef = doc(db, "weeks", weekId, "games", gameId);
-        const gameDoc = {
-          day,
-          home,
-          away,
-          kickoffTs: isNaN(ts) ? null : ts,
-          ...(winner ? { winner } : {}),
-          updatedAt: Date.now()
-        };
-        gameBatch.set(gameRef, gameDoc, { merge: true });
-        gameCount++;
+    const headers = rows[0].map(h => (h || "").trim());
+    const fixed = ["weekId","day","kickoff","home","away","winner"];
+    for (let i=0;i<fixed.length;i++){
+      if ((headers[i] || "").toLowerCase() !== fixed[i]) {
+        alert(`Header ${i+1} mismatch. Expected ${fixed[i]}, got "${headers[i]}"`);
+        return;
       }
-
-      log("Attempting to commit batch:", gameCount);
-      await gameBatch.commit();
-      log("✅ Batch committed successfully!");
-    } catch (e) {
-      log("❌ ERROR:", e?.message || String(e));
-      alert("Import error: " + (e?.message || e));
     }
-  };
+    const userCols = headers.slice(6).map(h => (h || "").trim()).filter(Boolean);
+    if (!userCols.length) { alert("No user columns after the first 6 headers."); return; }
+
+    log("Users:", userCols.join(", "));
+
+    // Build games batch and collect picks
+    const gameBatch = writeBatch(db);
+    const perUserPicks = new Map(); // email -> { weeks: Map(weekId -> {picks}) }
+    let gameCount = 0, pickCells = 0, badKickoffs = 0;
+
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || !row.length) continue;
+
+      const [weekId, day, kickoff, home, away, winner] =
+        row.slice(0,6).map(x => (x || "").trim());
+
+      if (!weekId || !home || !away) { log(`⚠ skip row ${r+1} (missing week/home/away)`); continue; }
+
+      // parse kickoff
+      // support "YYYY-MM-DDTHH:mm" and "YYYY-MM-DD HH:mm" (seconds optional)
+      const k = kickoff.replace(" ", "T");
+      let ts = Date.parse(k);
+      if (!Number.isFinite(ts)) {
+        // try stripping seconds if present
+        const k2 = k.replace(/:([0-5]\d):([0-5]\d)$/, ":$1");
+        ts = Date.parse(k2);
+      }
+      if (!Number.isFinite(ts)) { badKickoffs++; ts = null; }
+
+      const gameId = makeGameId(home, away, ts);
+      const gameRef = doc(db, "weeks", weekId, "games", gameId);
+      const gameDoc = {
+        day: day || "Sunday",
+        home, away,
+        createdAt: Date.now(),
+        ...(ts ? { kickoffTs: ts } : {}),
+        ...(winner === "home" || winner === "away" ? { winner } : {})
+      };
+      gameBatch.set(gameRef, gameDoc, { merge: true });
+      gameCount++;
+
+      // picks across user columns
+      for (let u = 0; u < userCols.length; u++){
+        const email = userCols[u];
+        const side = (row[6+u] || "").trim().toLowerCase();
+        if (side !== "home" && side !== "away") continue;
+
+        const key = email.toLowerCase();
+        if (!perUserPicks.has(key)) perUserPicks.set(key, { email, weeks: new Map() });
+        const rec = perUserPicks.get(key);
+        if (!rec.weeks.has(weekId)) rec.weeks.set(weekId, { email, weekId, picks: {} });
+        rec.weeks.get(weekId).picks[gameId] = side;
+        pickCells++;
+      }
+    }
+
+    log("Writing games:", String(gameCount), badKickoffs ? `| kickoffTs missing in ${badKickoffs} row(s)` : "");
+    await gameBatch.commit();
+    log("Games batch committed.");
+
+    // Now write picks docs
+    let pickDocs = 0;
+    for (const { email, weeks } of perUserPicks.values()){
+      for (const [weekId, data] of weeks){
+        const uid = uidFromEmail(email);
+        const ref = doc(db, "picks", uid, "weeks", weekId);
+        await setDoc(ref, { email, weekId, picks: data.picks, updatedAt: Date.now() }, { merge:true });
+        pickDocs++;
+      }
+    }
+    log("✅ Done. Games upserted:", String(gameCount), "| picks cells:", String(pickCells), "| picks docs:", String(pickDocs));
+    alert("Import complete!");
+  } catch (e) {
+    console.error(e);
+    log("❌ ERROR:", e?.message || String(e));
+    alert("Import error: " + (e?.message || e));
+  }
+};
+
 </script>
 </body>
 </html>
