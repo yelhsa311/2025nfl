@@ -319,9 +319,18 @@ function isWriteLocked(){
       o.value=id; o.textContent=`Week ${i}`;
       sel.appendChild(o);
     }
+    // NEW: restore last viewed week if present
+    const remembered = localStorage.getItem("lastWeekId");
+    state.weekId = remembered || state.weekId;
     sel.value = state.weekId;
-    sel.onchange = () => { state.weekId = sel.value; subscribeWeek(); };
+  
+    sel.onchange = () => {
+      state.weekId = sel.value;
+      localStorage.setItem("lastWeekId", state.weekId); // NEW: remember
+      subscribeWeek();
+    };
   }
+
 
   let unsubGames=null, unsubLock=null, unsubMyPicks=null;
 
@@ -345,6 +354,29 @@ function isWriteLocked(){
       el("#lockBadge").className   = "lock " + ((state.lock || autoLocked) ? "danger" : "muted");
       el("#adminWeekLock").checked = state.lock;
       renderGames();
+
+     // NEW: live countdown timer
+    clearInterval(window.__lockTicker);
+    if (state.lock || !state.lockAt) return;
+  
+    function tick(){
+      const now = Date.now();
+      const diff = state.lockAt - now;
+      if (diff <= 0){
+        el("#lockBadge").textContent = "Locked (kickoff)";
+        el("#lockBadge").className   = "lock danger";
+        clearInterval(window.__lockTicker);
+        renderGames();
+        return;
+      }
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      el("#lockBadge").textContent = `Locks in ${m}m ${String(s).padStart(2, "0")}s`;
+      el("#lockBadge").className   = "lock muted";
+    }
+    tick();
+    window.__lockTicker = setInterval(tick, 1000);
+     
     }, e => console.error("lock listener", e));
     el("#adminWeekLock").onchange = async (e) => {
       if (!state.isAdmin) return;
