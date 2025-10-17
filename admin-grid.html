@@ -16,7 +16,7 @@
   button.primary{outline:2px solid var(--accent)}
   table{width:100%;border-collapse:collapse}
   th,td{border-bottom:1px solid var(--border);padding:8px;vertical-align:middle;font-size:14px}
-  th{position:sticky;top:0;background:var(--card);z-index:2}
+  th{position:sticky;top:0;background:var(--card);z-index:1}
   tbody tr:hover{background:#12151c}
   .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
   .muted{color:var(--muted)}
@@ -35,15 +35,17 @@
     </div>
   </div>
 
+  <!-- LOGIN -->
   <div id="auth" class="card">
     <div class="row">
       <input id="email" type="email" placeholder="Email">
       <input id="pass" type="password" placeholder="Password">
       <button id="signInBtn" class="primary">Sign in</button>
     </div>
-    <div class="muted" style="margin-top:6px">Admins only. This view edits games (winner) and users’ picks for a week.</div>
+    <div class="muted" style="margin-top:6px">Admins only. Manage games, winners, and user picks per week.</div>
   </div>
 
+  <!-- APP -->
   <div id="app" class="card" style="display:none">
     <div class="row" style="gap:12px">
       <label>Week:
@@ -61,6 +63,36 @@
       <span id="status" class="muted"></span>
     </div>
 
+    <!-- Add Game panel -->
+    <div class="card" id="addGamePanel">
+      <div class="row" style="gap:12px; align-items:flex-end;">
+        <label>Day
+          <select id="addDay">
+            <option>Thursday</option>
+            <option>Friday</option>
+            <option>Saturday</option>
+            <option selected>Sunday</option>
+            <option>Monday</option>
+          </select>
+        </label>
+
+        <label>Home
+          <input id="addHome" placeholder="e.g. Dallas Cowboys" />
+        </label>
+
+        <label>Away
+          <input id="addAway" placeholder="e.g. Philadelphia Eagles" />
+        </label>
+
+        <label>Kickoff (local)
+          <input id="addKick" type="datetime-local" />
+        </label>
+
+        <button id="addGameBtn" class="primary">+ Add game</button>
+        <span class="muted">Adds to <strong id="wkLabel"></strong></span>
+      </div>
+    </div>
+
     <div class="card" style="max-height:70vh;overflow:auto">
       <table id="grid">
         <thead id="thead"></thead>
@@ -73,10 +105,9 @@
 </div>
 
 <script type="module">
-  // Firebase (same project as your app)
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { getFirestore, collection, getDocs, doc, setDoc, writeBatch, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  import { getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch, query, orderBy, addDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
@@ -90,29 +121,24 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
+  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // your admin uid
 
-  // Keep this in sync with your index.html
-  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
-
-  // Helpers
   const el = s => document.querySelector(s);
   const byId = id => document.getElementById(id);
+  const log  = (...a)=>{ el("#log").textContent += a.join(" ") + "\n"; };
+  const setStatus = t => { el("#status").textContent = t || ""; };
   const fmtTime = ts => ts ? new Date(ts).toLocaleString([], { month:"short", day:"2-digit", hour:"numeric", minute:"2-digit" }) : "";
 
   const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
   const uidFromEmail = email => slug(email).slice(0,64);
-  const makeGameId = (home, away, kickoffTs) => `${slug(home)}__${slug(away)}__${kickoffTs ?? "na"}`;
 
   const state = {
     weekId: null,
-    users: [],          // emails
-    games: [],          // [{id, day, home, away, kickoffTs, winner}]
-    picksByUser: new Map(), // email -> { [gameId]: "home"|"away" }
-    dirty: { games: new Set(), picks: new Set() } // track edited rows
+    users: [],                 // emails (columns)
+    games: [],                 // [{id, day, home, away, kickoffTs, winner}]
+    picksByUser: new Map(),    // email -> { [gameId]: "home"|"away" }
+    dirty: { games: new Set(), picks: new Set() }
   };
-
-  function log(...a){ el("#log").textContent += a.join(" ") + "\n"; }
-  function setStatus(t){ el("#status").textContent = t || ""; }
 
   // Auth
   onAuthStateChanged(auth, (user)=>{
@@ -126,7 +152,30 @@
     el("#adminTag").style.display = isAdmin ? "" : "none";
     el("#auth").style.display="none";
     el("#app").style.display="";
-    if(!isAdmin){ alert("Admins only."); signOut(auth); }
+    if(!isAdmin){ alert("Admins only."); signOut(auth); return; }
+
+    // week select
+    const sel = byId("weekSelect"); sel.innerHTML="";
+    for (let i=1;i<=18;i++){
+      const id = `2025-Week-${String(i).padStart(2,"0")}`;
+      const o = document.createElement("option"); o.value=id; o.textContent=`Week ${i}`;
+      sel.appendChild(o);
+    }
+    const remembered = localStorage.getItem("adminGridWeek");
+    state.weekId = remembered || `2025-Week-01`;
+    sel.value = state.weekId;
+    sel.onchange = ()=>{ state.weekId = sel.value; localStorage.setItem("adminGridWeek", state.weekId); loadWeek(); };
+
+    // actions
+    byId("signInBtn").onclick = async ()=>{};
+    byId("refreshBtn").onclick = loadWeek;
+    byId("applyUsersBtn").onclick = applyUsers;
+    byId("saveBtn").onclick = saveAll;
+    byId("addGameBtn").onclick = addGame;
+
+    // init
+    loadUsersPref();
+    loadWeek();
   });
 
   byId("signInBtn").onclick = async ()=>{
@@ -135,140 +184,153 @@
     }catch(e){ alert(e.message); }
   };
 
-  // Week selector
-  const sel = byId("weekSelect");
-  for (let i=1;i<=18;i++){
-    const id = `2025-Week-${String(i).padStart(2,"0")}`;
-    const o = document.createElement("option");
-    o.value=id; o.textContent=`Week ${i}`;
-    sel.appendChild(o);
-  }
-  const remembered = localStorage.getItem("adminGridWeek");
-  sel.value = remembered || `2025-Week-01`;
-  state.weekId = sel.value;
-  sel.onchange = ()=>{ state.weekId = sel.value; localStorage.setItem("adminGridWeek", state.weekId); loadWeek(); };
-
-  byId("refreshBtn").onclick = loadWeek;
-
-  // Users input
+  // Users prefs
   function saveUsersPref(){
     localStorage.setItem("adminGridUsers:"+state.weekId, JSON.stringify(state.users));
+    localStorage.setItem("adminGridUsers:GLOBAL", JSON.stringify(Array.from(new Set(state.users))));
     byId("usersInput").value = state.users.join(", ");
   }
   function loadUsersPref(){
     const raw = localStorage.getItem("adminGridUsers:"+state.weekId);
-    if (raw) {
+    if (raw){
       try { state.users = JSON.parse(raw) || []; }
       catch { state.users = []; }
-      byId("usersInput").value = state.users.join(", ");
     }
+    byId("usersInput").value = (state.users||[]).join(", ");
   }
-  byId("applyUsersBtn").onclick = ()=>{
+  function applyUsers(){
     const emails = byId("usersInput").value.split(",").map(s=>s.trim()).filter(Boolean);
     state.users = emails;
     saveUsersPref();
     renderGrid();
-  };
-
-  // Load week: games + auto-detect users from picks (merge with saved list)
-  async function loadWeek(){
-    setStatus("Loading…");
-    el("#thead").innerHTML = "";
-    el("#tbody").innerHTML = "";
-    state.games = [];
-    state.picksByUser.clear();
-    state.dirty.games.clear();
-    state.dirty.picks.clear();
-
-    loadUsersPref();
-
-    // Fetch games for the week (order by kickoffTs)
-    const gq = query(collection(db,"weeks",state.weekId,"games"), orderBy("kickoffTs","asc"));
-    const gSnap = await getDocs(gq);
-    gSnap.forEach(d=>{
-      const v = d.data();
-      state.games.push({
-        id: d.id,
-        day: v.day || "",
-        home: v.home || "",
-        away: v.away || "",
-        kickoffTs: v.kickoffTs || null,
-        winner: v.winner || ""
-      });
-    });
-
-    // If no games yet, show empty grid
-    if (!state.games.length){
-      renderGrid();
-      setStatus("No games found for "+state.weekId);
-      // still try to auto-detect users from picks
-    }
-
-    // Auto-detect users from picks docs for this week
-    // (we scan picks/*/weeks/{weekId} — but we don’t know all users, so we can’t list all; instead,
-    // we rely on the saved users list OR the ones we’ve seen before.)
-    // To help, we’ll try a small heuristic: check localStorage for a global list.
-    const globalUsers = JSON.parse(localStorage.getItem("adminGridUsers:GLOBAL") || "[]");
-    const merged = new Set([...(state.users||[]), ...globalUsers]);
-    state.users = [...merged];
-    saveUsersPref(); // keep in sync
-
-    // Load picks for each known user for this week
-    for (const email of state.users){
-      const uid = uidFromEmail(email);
-      const pRef = doc(db,"picks",uid,"weeks",state.weekId);
-      try{
-        const snap = await getDocs(collection(db,"picks",uid,"weeks")); // we cannot read a single doc with getDocs, so:
-      }catch{}
-    }
-    // Better: fetch each doc directly with setDoc/get; but dynamic import:
-    // Lightweight single-doc read using fetch-like approach (workaround):
-    // We’ll just lazy-load picks when rendering each user column.
-
-    renderGrid();
-    setStatus("");
   }
 
-  // Lazy fetch a user's picks doc for the current week
-  async function getUserPicks(email){
-    if (state.picksByUser.has(email)) return state.picksByUser.get(email);
-    const uid = uidFromEmail(email);
-    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/picks/${uid}/weeks/${state.weekId}`;
+  // Add Game
+  const toMs = (val) => {
+    if (!val) return null; const ms = Date.parse(val); return Number.isFinite(ms) ? ms : null;
+  };
+  async function addGame(){
     try{
-      const res = await fetch(url);
-      if (res.ok){
-        const json = await res.json();
-        const picks = (json.fields && json.fields.picks && json.fields.picks.mapValue && json.fields.picks.mapValue.fields) || {};
-        const obj = {};
-        for (const [k,v] of Object.entries(picks)) obj[k] = (v.stringValue || "").toLowerCase();
-        state.picksByUser.set(email, obj);
-        return obj;
+      const day  = byId("addDay").value.trim() || "Sunday";
+      const home = byId("addHome").value.trim();
+      const away = byId("addAway").value.trim();
+      const kick = byId("addKick").value; // "YYYY-MM-DDTHH:mm"
+      const kickoffTs = toMs(kick);
+
+      if (!home || !away){ alert("Please enter both Home and Away teams."); return; }
+
+      await addDoc(collection(db, "weeks", state.weekId, "games"), {
+        day, home, away, createdAt: Date.now(), ...(kickoffTs ? { kickoffTs } : {})
+      });
+
+      byId("addHome").value=""; byId("addAway").value=""; byId("addKick").value="";
+      setStatus("Game added.");
+      await loadWeek();
+    }catch(e){
+      console.error(e);
+      setStatus("Add game error: " + (e.message||e));
+      alert("Add game error: " + (e.message||e));
+    }
+  }
+
+  // Load games + picks
+  async function loadWeek(){
+    try{
+      setStatus("Loading…");
+      byId("wkLabel").textContent = state.weekId;
+      el("#thead").innerHTML = ""; el("#tbody").innerHTML = "";
+      state.games = []; state.picksByUser.clear();
+      state.dirty.games.clear(); state.dirty.picks.clear();
+
+      // games: order by kickoffTs (or createdAt as fallback)
+      const gq = query(collection(db,"weeks",state.weekId,"games"), orderBy("kickoffTs","asc"));
+      const snap = await getDocs(gq);
+      snap.forEach(d=>{
+        const v=d.data();
+        state.games.push({
+          id:d.id,
+          day:v.day||"",
+          home:v.home||"",
+          away:v.away||"",
+          kickoffTs: typeof v.kickoffTs==="number" ? v.kickoffTs : null,
+          winner:v.winner||""
+        });
+      });
+
+      // ensure users list
+      const globalUsers = JSON.parse(localStorage.getItem("adminGridUsers:GLOBAL") || "[]");
+      const merged = new Set([...(state.users||[]), ...globalUsers]);
+      state.users = [...merged];
+      saveUsersPref();
+
+      // prefetch picks for listed users
+      for (const email of state.users){
+        const uid = uidFromEmail(email);
+        const pRef = doc(db,"picks",uid,"weeks",state.weekId);
+        try{
+          const psnap = await getDoc(pRef);
+          const picks = psnap.exists() ? (psnap.data().picks||{}) : {};
+          state.picksByUser.set(email, picks);
+        }catch{}
       }
-    }catch(e){ /* ignore */ }
-    const empty = {};
-    state.picksByUser.set(email, empty);
-    return empty;
+
+      renderGrid();
+      setStatus(state.games.length ? "" : "No games found for "+state.weekId);
+    }catch(e){
+      console.error(e);
+      setStatus("Load error: " + (e.message||e));
+    }
   }
 
   function headerHtml(){
     const cols = [
-      "<th style='min-width:80px'>Day</th>",
+      "<th style='min-width:90px'>Day</th>",
       "<th style='min-width:160px'>Kickoff</th>",
-      "<th style='min-width:200px'>Home</th>",
-      "<th style='min-width:200px'>Away</th>",
+      "<th style='min-width:220px'>Home</th>",
+      "<th style='min-width:220px'>Away</th>",
       "<th style='min-width:120px'>Winner</th>",
     ];
     for (const email of state.users) cols.push(`<th style="min-width:140px">${email}</th>`);
     return `<tr>${cols.join("")}</tr>`;
   }
 
+  function option(val, txt, selected){ return `<option value="${val}" ${selected?'selected':''}>${txt}</option>`; }
+
+  function winnerCell(g){
+    const v = g.winner || "";
+    return `
+      <select data-kind="winner" data-gameid="${g.id}">
+        ${option("", "", v==="")}
+        ${option("home","home", v==="home")}
+        ${option("away","away", v==="away")}
+      </select>
+    `;
+  }
+
+  function pickSelect(g, email, current){
+    const s = document.createElement("select");
+    s.innerHTML = `
+      ${option("", "", current==="")}
+      ${option("home","home", current==="home")}
+      ${option("away","away", current==="away")}
+    `;
+    s.dataset.kind="pick";
+    s.dataset.gameid=g.id;
+    s.dataset.email=email;
+    s.onchange = () => {
+      s.classList.add("dirty");
+      state.dirty.picks.add(email);
+      const p = state.picksByUser.get(email) || {};
+      p[g.id] = s.value || "";
+      state.picksByUser.set(email, p);
+    };
+    return s;
+  }
+
   async function renderGrid(){
     el("#thead").innerHTML = headerHtml();
     const tb = el("#tbody");
     tb.innerHTML = "";
-
-    // Preload picks for all users (parallel)
-    await Promise.all(state.users.map(getUserPicks));
 
     for (const g of state.games){
       const tr = document.createElement("tr");
@@ -279,7 +341,7 @@
         <td>${g.away}</td>
         <td>${winnerCell(g)}</td>
       `;
-      // User pick cells
+
       for (const email of state.users){
         const picks = state.picksByUser.get(email) || {};
         const val = picks[g.id] || "";
@@ -291,92 +353,51 @@
     }
   }
 
-  function option(tag, val, txt, selected){ return `<option value="${val}" ${selected?'selected':''}>${txt}</option>`; }
-  function winnerCell(g){
-    const v = g.winner || "";
-    return `
-      <select data-kind="winner" data-gameid="${g.id}">
-        ${option("","", "", v==="")}
-        ${option("","home","home", v==="home")}
-        ${option("","away","away", v==="away")}
-      </select>
-    `;
-  }
-  function pickSelect(g, email, current){
-    const s = document.createElement("select");
-    s.innerHTML = `
-      ${option("","", "", current==="")}
-      ${option("","home","home", current==="home")}
-      ${option("","away","away", current==="away")}
-    `;
-    s.dataset.kind = "pick";
-    s.dataset.gameid = g.id;
-    s.dataset.email = email;
-    s.onchange = () => {
-      s.classList.add("dirty");
-      state.dirty.picks.add(email); // mark that user's doc needs save
-      // update local cache immediately
-      const p = state.picksByUser.get(email) || {};
-      p[g.id] = s.value || "";
-      state.picksByUser.set(email, p);
-    };
-    return s;
-  }
-
-  // Track winner changes
+  // track winner changes
   el("#tbody").addEventListener("change", (e)=>{
     const t = e.target;
     if (!(t instanceof HTMLSelectElement)) return;
     if (t.dataset.kind === "winner"){
       t.classList.add("dirty");
       state.dirty.games.add(t.dataset.gameid);
-      // update local game
       const g = state.games.find(x => x.id === t.dataset.gameid);
       if (g) g.winner = t.value || "";
     }
   });
 
-  // SAVE
-  byId("saveBtn").onclick = async ()=>{
+  async function saveAll(){
     try{
       setStatus("Saving…");
+      // winners (batch)
       const batch = writeBatch(db);
-
-      // Save winners for dirty games
-      const gamesDirty = [...state.dirty.games];
-      for (const gid of gamesDirty){
+      const gameIds = [...state.dirty.games];
+      for (const gid of gameIds){
         const g = state.games.find(x => x.id === gid);
         if (!g) continue;
-        const ref = doc(db, "weeks", state.weekId, "games", gid);
-        batch.set(ref, { winner: g.winner || null, updatedAt: Date.now() }, { merge:true });
+        batch.set(doc(db,"weeks",state.weekId,"games",gid), { winner: g.winner || null, updatedAt: Date.now() }, { merge:true });
       }
-
       await batch.commit();
 
-      // Save picks for users marked dirty
-      let pickDocs = 0;
+      // picks (per user)
+      let pickDocs=0;
       for (const email of state.dirty.picks){
-        const picks = state.picksByUser.get(email) || {};
         const uid = uidFromEmail(email);
-        const ref = doc(db, "picks", uid, "weeks", state.weekId);
-        await setDoc(ref, { email, weekId: state.weekId, picks, updatedAt: Date.now() }, { merge:true });
+        const picks = state.picksByUser.get(email) || {};
+        await setDoc(doc(db,"picks",uid,"weeks",state.weekId),
+          { email, weekId: state.weekId, picks, updatedAt: Date.now() }, { merge:true });
         pickDocs++;
       }
 
       state.dirty.games.clear();
       state.dirty.picks.clear();
-      // clear dirty UI marks
       document.querySelectorAll(".dirty").forEach(n=>n.classList.remove("dirty"));
-      setStatus(`Saved winners: ${gamesDirty.length} | picks docs: ${pickDocs}`);
+      setStatus(`Saved winners: ${gameIds.length} | picks docs: ${pickDocs}`);
     }catch(e){
       console.error(e);
       setStatus("Save error: " + (e.message||e));
       alert("Save error: " + (e.message||e));
     }
-  };
-
-  // Init
-  loadWeek();
+  }
 </script>
 </body>
 </html>
