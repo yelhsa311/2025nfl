@@ -127,6 +127,7 @@
   <div class="bar">
     <h1 style="margin:0">Family NFL Picks</h1>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
+    <a href="importer.html" class="admin-only" style="margin-left:10px;">📦 Week Importer</a>
     <div id="userBox" class="row"></div>
   </div>
 
@@ -302,6 +303,11 @@ function isWriteLocked(){
     el("#adminBadge").style.display    = state.isAdmin ? "" : "none";
     el("#finalizeWrap").style.display  = state.isAdmin ? "" : "none";
     el("#adminToolbar").style.display  = state.isAdmin ? "" : "none";
+
+    // Show or hide any .admin-only links (like Week Importer)
+    document.querySelectorAll(".admin-only").forEach(el => {
+      el.style.display = state.isAdmin ? "" : "none";
+    });
 
     el("#auth").style.display="none";
     el("#app").style.display ="block";
