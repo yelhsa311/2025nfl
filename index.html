@@ -26,6 +26,22 @@
     background:var(--card);
     color:var(--fg);
   }
+
+  /* Standings table cues */
+  #standings table{ border-collapse:separate; border-spacing:0; overflow:hidden; }
+  #standings tbody tr.me { outline:2px solid #6ea8ff; outline-offset:-2px; background:rgba(110,168,255,.06); }
+  #standings tbody tr.leader { background:rgba(34,197,94,.08); }
+  #standings tbody tr.sub500 { opacity:.9; }
+  #standings tbody tr.perfect { background:rgba(34,197,94,.14); }
+  
+  .badge-chip{
+    display:inline-block; font-size:11px; padding:2px 6px; border-radius:999px;
+    border:1px solid var(--border); background:#12151c; margin-left:6px;
+  }
+  .badge-chip.leader { color:#5be087; border-color:#1b7f48; }
+  .badge-chip.me     { color:#9cc7ff; border-color:#2e4370; }
+  .badge-chip.perfect{ color:#86f5b2; border-color:#1ea45e; }
+  .badge-chip.sub500 { color:#ff9a9a; border-color:#8a2b2b; }
   
   /* User's pick */
   .team.winner{
@@ -442,6 +458,10 @@ function isWriteLocked(){
           if (act === "clear")     setWinner(g.id, null);
         });
       }
+      
+    // add hover/tap tooltips using the same aria-label text
+    home.setAttribute("title", home.getAttribute("aria-label") || g.home);
+    away.setAttribute("title", away.getAttribute("aria-label") || g.away);
 
       row.appendChild(home); row.appendChild(vs); row.appendChild(away);
       return row;
@@ -573,15 +593,58 @@ function isWriteLocked(){
   }
 
   function renderStandingsTable(rows, totalGames){
-    if (!rows.length){ el("#standingsBody").innerHTML = `<div class=muted>No data yet.</div>`; return; }
-    const pct = (w, t) => t? (w/t*100).toFixed(1)+"%" : "—";
+    if (!rows.length){
+      el("#standingsBody").innerHTML = `<div class=muted>No data yet.</div>`;
+      return;
+    }
+  
+    // figure out leaders + my email
+    const myEmail = state.user?.email || "";
+    const maxWins = Math.max(...rows.map(r => r.wins));
+    const pct = (w, t) => t ? (w/t*100).toFixed(1)+"%" : "—";
+  
     const html = [
-      `<table><thead><tr><th>Rank</th><th>User</th><th>Wins</th><th>Played</th><th>Win %</th></tr></thead><tbody>`,
-      ...rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.email}</td><td>${r.wins}</td><td>${r.played}/${totalGames}</td><td>${pct(r.wins, r.played)}</td></tr>`),
-      `</tbody></table>`
-    ].join("");
-    el("#standingsBody").innerHTML = html;
+      `<table class="standings-table"><thead><tr>
+        <th>Rank</th><th>User</th><th>Wins</th><th>Played</th><th>Win %</th>
+      </tr></thead><tbody>`
+    ];
+  
+    rows.forEach((r, i) => {
+      const isLeader = r.wins === maxWins && r.played > 0;
+      const isMe = r.email === myEmail;
+      const isPerfect = r.played > 0 && r.wins === r.played;
+      const isSub500 = r.played > 0 && (r.wins / r.played) < 0.5;
+  
+      const rowClasses = [
+        isLeader ? "leader" : "",
+        isMe ? "me" : "",
+        isPerfect ? "perfect" : "",
+        isSub500 ? "sub500" : ""
+      ].filter(Boolean).join(" ");
+  
+      // small chips after the user cell
+      const chips = [
+        isLeader ? `<span class="badge-chip leader">🥇 Leader</span>` : "",
+        isMe ? `<span class="badge-chip me">⭐ You</span>` : "",
+        isPerfect ? `<span class="badge-chip perfect">🏆 Perfect</span>` : "",
+        isSub500 ? `<span class="badge-chip sub500">↘ Sub-.500</span>` : ""
+      ].join("");
+  
+      html.push(
+        `<tr class="${rowClasses}">
+          <td>${i+1}</td>
+          <td>${r.email}${chips}</td>
+          <td>${r.wins}</td>
+          <td>${r.played}/${totalGames}</td>
+          <td>${pct(r.wins, r.played)}</td>
+        </tr>`
+      );
+    });
+  
+    html.push(`</tbody></table>`);
+    el("#standingsBody").innerHTML = html.join("");
   }
+
 
   async function publishWeekStandings(){
     if (!state.isAdmin) return;
