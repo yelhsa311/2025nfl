@@ -36,7 +36,7 @@
       <button id="signInBtn" class="primary">Sign in</button>
     </div>
     <div class="muted" style="margin-top:6px">
-      Admins only. Upload a single CSV with header:
+      Admins only. Upload a CSV with header:
       <code>weekId,day,kickoff,home,away,winner,&lt;user1@email&gt;,...</code>
       — picks use <code>home</code> or <code>away</code>.
     </div>
@@ -75,6 +75,7 @@
 </div>
 
 <script type="module">
+  // --- Diagnostics (logs runtime issues)
   window.addEventListener("error", (e) => {
     const msg = (e?.error && e.error.stack) ? e.error.stack : (e?.message || String(e));
     const box = document.querySelector("#log");
@@ -86,7 +87,7 @@
     if (box) box.textContent += "❌ Promise rejection: " + msg + "\n";
   });
 
-  // --- Firebase
+  // --- Firebase setup ---
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
@@ -95,7 +96,6 @@
     initializeFirestore, getFirestore, doc, setDoc, writeBatch
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // Use the same config as your main app
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
     authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -107,76 +107,27 @@
   };
 
   const app = initializeApp(firebaseConfig);
-  initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
+  initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  document.querySelector("#permBtn").onclick = async () => {
-    try {
-      const probe = doc(db, "weeks", "TEST-WEEK", "games", "probe");
-      await setDoc(probe, { ok: true, at: Date.now() }, { merge: true });
-      const box = document.querySelector("#log");
-      box.textContent += "✅ Permissions OK: could write to weeks/TEST-WEEK/games/probe\n";
-    } catch (e) {
-      const box = document.querySelector("#log");
-      box.textContent += "❌ Permissions FAIL: " + (e.message || e) + "\n";
-      alert("Firestore denied a write.\nIf you see 'permission-denied', rules need a tweak.");
-    }
-  };
-
-  // Keep in sync with index.html
   const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
 
-  // --- Helpers
   const el = s => document.querySelector(s);
-  const log = (...a) => { el("#log").textContent += a.join(" ") + "\\n"; };
+  const log = (...a) => { el("#log").textContent += a.join(" ") + "\n"; };
 
-  const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-  const uidFromEmail = email => slug(email).slice(0,64);
-  const makeGameId = (home, away, kickoffTs) => `${slug(home)}__${slug(away)}__${kickoffTs ?? "na"}`;
-
-  // --- Robust CSV parser (autodetect , ; or tab; handles BOM, CRLF; honors quotes)
+  // --- CSV Parser ---
   function parseCSV(text) {
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
-    text = text.replace(/\r\n/g, "\\n").replace(/\\r/g, "\\n"); // normalize
-    const first = (text.split("\\n").find(l => l.trim().length) || "");
-    const candidates = [",",";","\\t"];
-    let delim = ",", best = -1;
-    for (const d of candidates) {
-      let count=0, q=false;
-      for (let i=0;i<first.length;i++){
-        const c = first[i];
-        if (c === '"'){ if (q && first[i+1]==='"'){ i++; } else q=!q; }
-        else if (!q && c === d) count++;
-      }
-      if (count > best){ best = count; delim = d; }
-    }
-    const rows = []; let row=[], cur="", inQ=false;
-    const push=()=>{ row.push(cur); cur=""; };
-    const pushRow=()=>{ rows.push(row); row=[]; };
-    for (let i=0;i<text.length;i++){
-      const c = text[i];
-      if (c === '"'){ if (inQ && text[i+1] === '"'){ cur+='"'; i++; } else inQ=!inQ; continue; }
-      if (!inQ && c === delim){ push(); continue; }
-      if (!inQ && c === "\\n"){ push(); pushRow(); continue; }
-      cur += c;
-    }
-    if (cur.length || row.length){ push(); pushRow(); }
-    return rows.filter(r => r.some(x => (x ?? "").trim() !== ""));
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const first = (text.split("\n").find(l => l.trim().length) || "");
+    const delim = [",",";","\t"].reduce((best, d) =>
+      (first.split(d).length > first.split(best).length ? d : best), ",");
+    const rows = text.split("\n").map(l => l.split(delim).map(x => x.trim()));
+    return rows.filter(r => r.some(x => x));
   }
 
-  // --- Diagnostics for Preview
-  function debugCSVText(t){
-    const head = t.slice(0, 200).split("\\n")[0];
-    const codes = Array.from(head).slice(0, 20).map(ch => ch.charCodeAt(0));
-    const lines = t.split(/\\r\\n|\\r|\\n/).length;
-    el("#preview").textContent =
-      "First line (200 chars max):\\n" + head +
-      "\\n\\nChar codes of first 20 chars:\\n" + codes.join(", ") +
-      "\\n\\nApprox line count: " + lines;
-  }
-
-  // --- Auth wiring
+  // --- Auth ---
   onAuthStateChanged(auth, (user) => {
     if (!user) { el("#auth").style.display=""; el("#app").style.display="none"; return; }
     const isAdmin = ADMIN_UIDS.includes(user.uid);
@@ -187,116 +138,87 @@
   });
 
   el("#signInBtn").onclick = async () => {
-    const email = el("#email").value.trim();
-    const pass  = el("#pass").value;
-    try { await signInWithEmailAndPassword(auth, email, pass); }
-    catch (e) { alert(e.message); }
+    try {
+      await signInWithEmailAndPassword(auth, el("#email").value.trim(), el("#pass").value);
+    } catch (e) { alert(e.message); }
   };
 
-  // --- Preview
+  // --- Test Permissions ---
+  document.querySelector("#permBtn").onclick = async () => {
+    try {
+      const probe = doc(db, "weeks", "TEST-WEEK", "games", "probe");
+      await setDoc(probe, { ok: true, at: Date.now() }, { merge: true });
+      log("✅ Permissions OK: could write to weeks/TEST-WEEK/games/probe");
+    } catch (e) {
+      log("❌ Permissions FAIL:", e.message || e);
+      alert("Firestore denied write: " + e.message);
+    }
+  };
+
+  // --- Preview ---
   el("#previewBtn").onclick = async () => {
     const f = el("#file").files?.[0];
-    if (!f) { alert("Choose a CSV first."); return; }
+    if (!f) return alert("Choose a CSV first.");
     const text = await f.text();
-    debugCSVText(text);
-
     const rows = parseCSV(text);
-    if (!rows.length) { alert("Parser produced 0 rows"); return; }
-    const head = rows[0];
-    const sample = rows.slice(1, Math.min(rows.length, 6));
-    el("#preview").textContent +=
-      "\\n\\n--- Parsed Preview ---\\n" +
-      [head.join(" , "), ...sample.map(r => r.join(" , "))].join("\\n");
+    el("#preview").textContent =
+      "First line (200 chars max):\n" + text.slice(0,200) +
+      "\n\nApprox line count: " + rows.length +
+      "\n\n--- Parsed Preview ---\n" +
+      rows.slice(0,6).map(r => r.join(" , ")).join("\n");
   };
 
-  // --- Import (verbose, with errors surfaced)
+  // --- Import (debug-enhanced) ---
   el("#importBtn").onclick = async () => {
-    try {
-      const f = el("#file").files?.[0];
-      if (!f) { alert("Choose a CSV first."); return; }
-      const text = await f.text();
-      const rows = parseCSV(text);
+    const logBox = document.querySelector("#log");
+    const log = (...a) => { logBox.textContent += a.join(" ") + "\n"; };
 
-      if (rows.length < 2) { alert("No data rows found."); return; }
+    try {
+      const f = document.querySelector("#file").files?.[0];
+      if (!f) return alert("Choose a CSV first.");
+      const text = await f.text();
+      log("Raw file length:", text.length);
+
+      const rows = parseCSV(text);
+      log("Rows parsed:", rows.length);
+      if (rows.length < 2) throw new Error("No data rows found after parsing.");
 
       const headers = rows[0].map(h => (h || "").trim());
-      const fixed = ["weekId","day","kickoff","home","away","winner"];
-      for (let i = 0; i < fixed.length; i++) {
-        if ((headers[i] || "").toLowerCase() !== fixed[i]) {
-          throw new Error(`Header ${i+1} mismatch. Expected "${fixed[i]}", got "${headers[i]}".`);
-        }
-      }
+      log("Headers:", headers.join(", "));
+
       const userCols = headers.slice(6).map(h => (h || "").trim()).filter(Boolean);
-      if (!userCols.length) throw new Error("No user columns found after the first 6 headers.");
+      log("User columns:", userCols.join(", "));
 
-      log("Users:", userCols.join(", "));
-
-      const perUserPicks = new Map(); // email -> { weeks: Map(weekId -> {picks}) }
       const gameBatch = writeBatch(db);
-
-      let gameCount = 0, pickCells = 0;
+      let gameCount = 0;
 
       for (let r = 1; r < rows.length; r++) {
         const row = rows[r];
         if (!row || !row.length) continue;
+        const [weekId, day, kickoff, home, away, winner] = row.slice(0,6).map(x => (x || "").trim());
+        if (!weekId || !home || !away) continue;
 
-        const [weekId, day, kickoff, home, away, winner] = row.slice(0, 6).map(x => (x || "").trim());
-        if (!weekId || !home || !away) { log(`Skip row ${r+1} (missing week/home/away)`); continue; }
-
-        const kickoffStr = kickoff.replace(" ", "T"); // accept both formats
-        const kickoffTs = kickoffStr ? Date.parse(kickoffStr) : null;
-        if (kickoffStr && !Number.isFinite(kickoffTs)) {
-          log(`⚠ Row ${r+1}: kickoff not parseable: "${kickoff}" — storing without kickoffTs`);
-        }
-
-        const gameId = makeGameId(home, away, Number.isFinite(kickoffTs) ? kickoffTs : null);
+        const kickoffStr = kickoff.replace(" ", "T");
+        const ts = Date.parse(kickoffStr);
+        const gameId = `${home.replaceAll(" ","_")}_vs_${away.replaceAll(" ","_")}`;
         const gameRef = doc(db, "weeks", weekId, "games", gameId);
         const gameDoc = {
-          day: day || "Sunday",
-          home, away,
-          createdAt: Date.now(),
-          ...(Number.isFinite(kickoffTs) ? { kickoffTs } : {}),
-          ...(winner === "home" || winner === "away" ? { winner } : {})
+          day,
+          home,
+          away,
+          kickoffTs: isNaN(ts) ? null : ts,
+          ...(winner ? { winner } : {}),
+          updatedAt: Date.now()
         };
         gameBatch.set(gameRef, gameDoc, { merge: true });
         gameCount++;
-
-        // picks across user columns
-        for (let u = 0; u < userCols.length; u++){
-          const email = userCols[u];
-          const side = (row[6 + u] || "").trim().toLowerCase();
-          if (side !== "home" && side !== "away") continue;
-          const key = email.toLowerCase();
-
-          if (!perUserPicks.has(key)) perUserPicks.set(key, { email, weeks: new Map() });
-          const rec = perUserPicks.get(key);
-          if (!rec.weeks.has(weekId)) rec.weeks.set(weekId, { email, weekId, picks: {} });
-          rec.weeks.get(weekId).picks[gameId] = side;
-          pickCells++;
-        }
       }
 
-      log("Writing games:", String(gameCount));
-      await gameBatch.commit().catch(e => { throw new Error("gameBatch.commit failed: " + e.message); });
-
-      // write picks docs
-      let pickDocs = 0;
-      for (const { email, weeks } of perUserPicks.values()){
-        for (const [weekId, data] of weeks){
-          const uid = uidFromEmail(email);
-          const ref = doc(db, "picks", uid, "weeks", weekId);
-          await setDoc(ref, {
-            email, weekId, picks: data.picks, updatedAt: Date.now()
-          }, { merge: true }).catch(e => { throw new Error(`setDoc picks (${email}, ${weekId}) failed: ` + e.message); });
-          pickDocs++;
-        }
-      }
-
-      log("✅ Done. Games upserted:", String(gameCount), "| picks cells processed:", String(pickCells), "| picks docs written:", String(pickDocs));
-      alert("Import complete!");
+      log("Attempting to commit batch:", gameCount);
+      await gameBatch.commit();
+      log("✅ Batch committed successfully!");
     } catch (e) {
-      console.error(e);
-      log("❌ Error:", e?.message || String(e));
+      log("❌ ERROR:", e?.message || String(e));
       alert("Import error: " + (e?.message || e));
     }
   };
