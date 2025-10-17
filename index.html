@@ -127,7 +127,8 @@
   <div class="bar">
     <h1 style="margin:0">Family NFL Picks</h1>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
-    <a href="importer.html" class="admin-only" style="margin-left:10px;">📦 Week Importer</a>
+    <!-- REPLACED: Week Importer link → Admin Grid link -->
+    <a href="admin-grid.html" class="admin-only" style="margin-left:10px;">🗂 Admin Grid</a>
     <div id="userBox" class="row"></div>
   </div>
 
@@ -241,7 +242,7 @@
   const db = getFirestore(app);
 
   // --- Admin UID(s) ---
-  window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // <— your admin account
+  window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // your admin account
 
   // --- Helpers ---
   const el = s => document.querySelector(s);
@@ -250,29 +251,28 @@
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
 
   function getEarliestKickoffMs(games){
-  let min = null;
-  for (const g of games || []){
-    const ms = typeof g.kickoffTs === "number" ? g.kickoffTs
-             : (g.kickoff ? Date.parse(g.kickoff) : null);
-    if (Number.isFinite(ms)) min = (min==null) ? ms : Math.min(min, ms);
+    let min = null;
+    for (const g of games || []){
+      const ms = typeof g.kickoffTs === "number" ? g.kickoffTs
+               : (g.kickoff ? Date.parse(g.kickoff) : null);
+      if (Number.isFinite(ms)) min = (min==null) ? ms : Math.min(min, ms);
+    }
+    return min;
   }
-  return min;
-}
 
-// 30 minutes before first kickoff
-function computeAutoLockAtMs(){
-  const first = getEarliestKickoffMs(state.games);
-  if (first == null) return null;
-  return first - 30 * 60 * 1000;
-}
+  // 30 minutes before first kickoff
+  function computeAutoLockAtMs(){
+    const first = getEarliestKickoffMs(state.games);
+    if (first == null) return null;
+    return first - 30 * 60 * 1000;
+  }
 
-// true if picks are locked for non-admins
-function isWriteLocked(){
-  const now = Date.now();
-  const autoLock = state.lockAt ? (now >= state.lockAt) : false;
-  return state.lock || autoLock;
-}
-
+  // true if picks are locked for non-admins
+  function isWriteLocked(){
+    const now = Date.now();
+    const autoLock = state.lockAt ? (now >= state.lockAt) : false;
+    return state.lock || autoLock;
+  }
 
   // --- Auth UI ---
   el("#signInBtn").onclick = async () => {
@@ -304,7 +304,7 @@ function isWriteLocked(){
     el("#finalizeWrap").style.display  = state.isAdmin ? "" : "none";
     el("#adminToolbar").style.display  = state.isAdmin ? "" : "none";
 
-    // Show or hide any .admin-only links (like Week Importer)
+    // Show or hide any .admin-only links (like Admin Grid)
     document.querySelectorAll(".admin-only").forEach(el => {
       el.style.display = state.isAdmin ? "" : "none";
     });
@@ -325,18 +325,17 @@ function isWriteLocked(){
       o.value=id; o.textContent=`Week ${i}`;
       sel.appendChild(o);
     }
-    // NEW: restore last viewed week if present
+    // Restore last viewed week if present
     const remembered = localStorage.getItem("lastWeekId");
     state.weekId = remembered || state.weekId;
     sel.value = state.weekId;
   
     sel.onchange = () => {
       state.weekId = sel.value;
-      localStorage.setItem("lastWeekId", state.weekId); // NEW: remember
+      localStorage.setItem("lastWeekId", state.weekId);
       subscribeWeek();
     };
   }
-
 
   let unsubGames=null, unsubLock=null, unsubMyPicks=null;
 
@@ -361,28 +360,26 @@ function isWriteLocked(){
       el("#adminWeekLock").checked = state.lock;
       renderGames();
 
-     // NEW: live countdown timer
-    clearInterval(window.__lockTicker);
-    if (state.lock || !state.lockAt) return;
-  
-    function tick(){
-      const now = Date.now();
-      const diff = state.lockAt - now;
-      if (diff <= 0){
-        el("#lockBadge").textContent = "Locked (kickoff)";
-        el("#lockBadge").className   = "lock danger";
-        clearInterval(window.__lockTicker);
-        renderGames();
-        return;
+      // Live countdown timer
+      clearInterval(window.__lockTicker);
+      if (state.lock || !state.lockAt) return;
+      function tick(){
+        const now = Date.now();
+        const diff = state.lockAt - now;
+        if (diff <= 0){
+          el("#lockBadge").textContent = "Locked (kickoff)";
+          el("#lockBadge").className   = "lock danger";
+          clearInterval(window.__lockTicker);
+          renderGames();
+          return;
+        }
+        const m = Math.floor(diff / 60000);
+        const s = Math.floor((diff % 60000) / 1000);
+        el("#lockBadge").textContent = `Locks in ${m}m ${String(s).padStart(2, "0")}s`;
+        el("#lockBadge").className   = "lock muted";
       }
-      const m = Math.floor(diff / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      el("#lockBadge").textContent = `Locks in ${m}m ${String(s).padStart(2, "0")}s`;
-      el("#lockBadge").className   = "lock muted";
-    }
-    tick();
-    window.__lockTicker = setInterval(tick, 1000);
-     
+      tick();
+      window.__lockTicker = setInterval(tick, 1000);
     }, e => console.error("lock listener", e));
     el("#adminWeekLock").onchange = async (e) => {
       if (!state.isAdmin) return;
@@ -395,20 +392,20 @@ function isWriteLocked(){
       state.games = []; snap.forEach(d => state.games.push({ id:d.id, ...d.data() }));
       el("#noGames").style.display = state.games.length ? "none" : "";
       renderGames();
-     // Admin auto-sync of lockAt: keep meta.lockAt = (earliest kickoff - 30m)
-     if (state.isAdmin){
-       const ms = computeAutoLockAtMs();
-       const want = ms ? Timestamp.fromMillis(ms) : null;
-       // Only write if changed or not set
-       onSnapshot(lockRef, s => {
-         const d = s.exists() ? s.data() : {};
-         const cur = d.lockAt && d.lockAt.seconds ? d.lockAt.seconds * 1000 : null;
-         if ((want && cur !== ms) || (!want && cur != null)) {
-           setDoc(lockRef, want ? { lockAt: want } : { lockAt: null }, { merge: true }).catch(console.error);
-         }
-       }, () => {});
-     }
-      
+
+      // Admin auto-sync of lockAt: keep meta.lockAt = (earliest kickoff - 30m)
+      if (state.isAdmin){
+        const ms = computeAutoLockAtMs();
+        const want = ms ? Timestamp.fromMillis(ms) : null;
+        // Only write if changed or not set
+        onSnapshot(lockRef, s => {
+          const d = s.exists() ? s.data() : {};
+          const cur = d.lockAt && d.lockAt.seconds ? d.lockAt.seconds * 1000 : null;
+          if ((want && cur !== ms) || (!want && cur != null)) {
+            setDoc(lockRef, want ? { lockAt: want } : { lockAt: null }, { merge: true }).catch(console.error);
+          }
+        }, () => {});
+      }
     }, e => console.error("games listener", e));
 
     // My picks
@@ -496,10 +493,10 @@ function isWriteLocked(){
           if (act === "clear")     setWinner(g.id, null);
         });
       }
-      
-    // add hover/tap tooltips using the same aria-label text
-    home.setAttribute("title", home.getAttribute("aria-label") || g.home);
-    away.setAttribute("title", away.getAttribute("aria-label") || g.away);
+
+      // tooltips
+      home.setAttribute("title", home.getAttribute("aria-label") || g.home);
+      away.setAttribute("title", away.getAttribute("aria-label") || g.away);
 
       row.appendChild(home); row.appendChild(vs); row.appendChild(away);
       return row;
@@ -576,7 +573,7 @@ function isWriteLocked(){
     computeWeekStandings();
   }
 
-  // --- Seeder: accepts {day, home, away, kickoff:"ISO"} or {kickoffTs:number} ---
+  // Seeder (kept from your file)
   async function seedWeek1(items){
     if (!state.isAdmin){ console.warn("Admin only"); return; }
     const col = collection(db, "weeks", state.weekId, "games");
@@ -683,7 +680,6 @@ function isWriteLocked(){
     el("#standingsBody").innerHTML = html.join("");
   }
 
-
   async function publishWeekStandings(){
     if (!state.isAdmin) return;
     // Save a compact leaderboard doc per user so we can sum for overall later
@@ -704,19 +700,9 @@ function isWriteLocked(){
     toast("Week standings published");
   }
 
-  // --- Expose helpers for console ---
+  // Expose for console debugging
   window.appState = state;
-  window.fx = { seedWeek1, clearGames, addDoc, collection, setWinner, computeWeekStandings, publishWeekStandings };
-  window.showUID = () => console.log("Your UID:", auth.currentUser?.uid);
-
-  // Make Firestore helpers visible to the console
   window.db = db;
-  window.doc = doc;
-  window.collection = collection;
-  window.collectionGroup = collectionGroup;
-  window.getDoc = getDoc;
-  window.getDocs = getDocs;
-
 </script>
 </body>
 </html>
