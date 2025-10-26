@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Grid — Family NFL Picks (v2 debug)</title>
+  <style>
+    :root{
+      --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
+      --text:#ebf0f7; --muted:#96a0b5; --accent:#5aa6ff;
+      --danger:#ef4444; --ok:#22c55e; --chip:#0f1729;
+      --input:#0f1420; --border:#232b3a;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; background:var(--bg); color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;}
+    a{color:var(--accent); text-decoration:none}
+    header{display:flex; gap:12px; align-items:center; padding:16px 20px; background:var(--panel);
+      position:sticky; top:0; z-index:20; border-bottom:1px solid var(--border)}
+    header .sp{flex:1} .role{border:1px solid var(--border); padding:6px 10px; border-radius:999px; background:var(--chip); color:var(--muted); font-size:12px}
+    .wrap{max-width:1200px; margin:0 auto; padding:20px}
+    .toolbar{display:flex; flex-wrap:wrap; gap:10px; align-items:center; background:var(--panel); padding:12px; border:1px solid var(--border); border-radius:12px}
+    .toolbar .group{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+    label{display:flex; align-items:center; gap:6px; font-size:14px; color:var(--muted)}
+    input, select{background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:14px}
+    button{background:#1a2434; color:#e8f0ff; border:1px solid var(--border); padding:8px 12px; border-radius:10px; cursor:pointer}
+    button.primary{background:var(--accent); color:#08101e; border-color:#3b82f6}
+    .divider{width:2px; height:26px; background:var(--border); margin:0 6px; border-radius:2px}
+    .table{margin-top:14px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--panel)}
+    .thead, .trow{display:grid; grid-template-columns: 110px 200px 1fr 1fr 120px 150px 90px; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding:10px}
+    .thead{background:var(--panel-2); color:var(--muted); font-weight:600}
+    .trow:nth-child(2n){background:rgba(255,255,255,0.02)}
+    .trow input, .trow select{width:100%}
+    .right{display:flex; gap:8px; justify-content:flex-end}
+    .status{color:var(--muted); margin-top:8px; font-size:13px}
+    .note{color:var(--muted); font-size:12px}
+    .card{margin-top:14px; border:1px solid var(--border); border-radius:12px; background:var(--panel); padding:12px}
+    code{background:#0c111b; border:1px solid var(--border); padding:2px 6px; border-radius:8px}
+    #debugList{font-size:13px; color:var(--muted); max-height:180px; overflow:auto}
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/index.html">← Back to App</a>
+    <strong>Admin Grid (v2 debug)</strong>
+    <div class="sp"></div>
+    <div id="userTag" class="role">…</div>
+    <div id="roleTag" class="role">ADMIN</div>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <div class="group">
+        <label>Season <input id="seasonInput" type="number" min="2000" max="2100" value="2025" style="width:96px"></label>
+        <label>Week <select id="weekSelect"></select></label>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <span class="divider"></span>
+      <div class="group">
+        <label>Day
+          <select id="dayInput">
+            <option>Thursday</option><option>Friday</option><option selected>Sunday</option><option>Monday</option><option>Saturday</option>
+          </select>
+        </label>
+        <label>Home <input id="homeInput" placeholder="Home team" style="min-width:180px"></label>
+        <label>Away <input id="awayInput" placeholder="Away team" style="min-width:180px"></label>
+        <label>Kickoff <input id="kickoffInput" type="datetime-local"></label>
+        <button id="addGameBtn">+ Add game</button>
+        <button id="saveChangesBtn" class="primary">Save Game Changes</button>
+      </div>
+    </div>
+
+    <div class="table">
+      <div class="thead">
+        <div>Day</div><div>Kickoff</div><div>Home</div><div>Away</div><div>Winner</div><div id="pickHeader">Pick (load user)</div><div class="right">Actions</div>
+      </div>
+      <div id="rows"></div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="card">
+      <strong>Debug</strong>
+      <div class="status">weekId: <code id="wid">—</code> • docs found: <code id="docCount">0</code></div>
+      <div id="debugList"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import { getFirestore, collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+    const cfg = {
+      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+      authDomain: "nfl-picks-b83c2.firebaseapp.com",
+      projectId: "nfl-picks-b83c2",
+      storageBucket: "nfl-picks-b83c2.appspot.com",
+      messagingSenderId: "802058909501",
+      appId: "1:802058909501:web:bb935c188891934de07754",
+      measurementId: "G-MSJHYZ4VG2"
+    };
+    const app = initializeApp(cfg);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const ADMIN_EMAILS = ["yelhsa311@gmail.com"];
+    const fmt2 = n => String(n).padStart(2,'0');
+    const weekId = (season, w) => `${season}-Week-${fmt2(w)}`;
+    const $ = sel => document.querySelector(sel);
+    const byId = id => document.getElementById(id);
+    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+    const state = { season: 2025, weekNum: 1, weekId: weekId(2025,1), games: [] };
+
+    // populate weeks
+    for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=`Week ${i}`; byId('weekSelect').appendChild(o); }
+    byId('weekSelect').value = "1";
+
+    onAuthStateChanged(auth, async (user)=>{
+      if(!user){ location.replace('/index.html'); return; }
+      byId('userTag').textContent = user.email || "";
+      if(!ADMIN_EMAILS.includes((user.email||"").toLowerCase())){
+        alert("Admins only."); await signOut(auth); location.replace('/index.html'); return;
+      }
+      wireUI();
+      await loadWeek();
+    });
+
+    function wireUI(){
+      byId('seasonInput').addEventListener('change', ()=>{
+        state.season = Number(byId('seasonInput').value||2025);
+        state.weekId = weekId(state.season, state.weekNum);
+        loadWeek();
+      });
+      byId('weekSelect').addEventListener('change', ()=>{
+        state.weekNum = Number(byId('weekSelect').value||1);
+        state.weekId = weekId(state.season, state.weekNum);
+        loadWeek();
+      });
+      byId('refreshBtn').addEventListener('click', loadWeek);
+      byId('addGameBtn').addEventListener('click', addGame);
+      byId('saveChangesBtn').addEventListener('click', saveChanges);
+    }
+
+    async function loadWeek(){
+      setStatus("Loading…");
+      byId('wid').textContent = state.weekId;
+      // Fetch WITHOUT orderBy; sort client-side
+      const q = query(collection(db, "games"), where("weekId", "==", state.weekId));
+      const snap = await getDocs(q);
+      state.games = [];
+      snap.forEach(d=>{
+        const g = d.data();
+        state.games.push({
+          id: d.id,
+          day: g.day || "",
+          kickoff: g.kickoff || "",
+          home: g.home || "",
+          away: g.away || "",
+          winner: g.winner || ""
+        });
+      });
+      // sort by kickoff
+      state.games.sort((a,b)=> new Date(a.kickoff) - new Date(b.kickoff));
+      renderGrid();
+      // debug
+      byId('docCount').textContent = String(state.games.length);
+      const list = state.games.slice(0,10).map(x=>`• ${x.home} vs ${x.away} (${x.day})`).join('<br>');
+      byId('debugList').innerHTML = list || '<em>No games</em>';
+      setStatus(`Adds to ${state.weekId} • ${state.games.length} game(s)`);
+    }
+
+    function renderGrid(){
+      const rows = byId('rows'); rows.innerHTML = "";
+      for(const g of state.games){
+        rows.appendChild(row(g));
+      }
+    }
+
+    function row(game){
+      const node = document.createElement('div');
+      node.className = 'trow';
+      node.setAttribute('data-id', game.id);
+      node.innerHTML = `
+        <input data-field="day" value="${escapeHtml(game.day)}" placeholder="Thursday">
+        <input data-field="kickoff" type="datetime-local" value="${toLocal(game.kickoff)}">
+        <input data-field="home" value="${escapeHtml(game.home)}" placeholder="Home team">
+        <input data-field="away" value="${escapeHtml(game.away)}" placeholder="Away team">
+        <select data-field="winner">
+          <option value=""></option>
+          <option value="home" ${game.winner==="home"?"selected":""}>home</option>
+          <option value="away" ${game.winner==="away"?"selected":""}>away</option>
+        </select>
+        <select data-field="pick" disabled>
+          <option value=""></option>
+          <option value="home">home</option>
+          <option value="away">away</option>
+        </select>
+        <div class="right">
+          <button class="btn-danger" data-action="delete">Delete</button>
+        </div>`;
+      node.querySelector('[data-action="delete"]').addEventListener('click', async ()=>{
+        if(!confirm("Delete this game?")) return;
+        await deleteDoc(doc(db, "games", game.id));
+        await loadWeek();
+      });
+      return node;
+    }
+
+    function toLocal(iso){
+      if(!iso) return "";
+      const d = new Date(iso);
+      const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const da=String(d.getDate()).padStart(2,'0');
+      const h=String(d.getHours()).padStart(2,'0'); const mi=String(d.getMinutes()).padStart(2,'0');
+      return `${y}-${m}-${da}T${h}:${mi}`;
+    }
+
+    async function addGame(){
+      const day = byId('dayInput').value;
+      const home = byId('homeInput').value.trim();
+      const away = byId('awayInput').value.trim();
+      const kick = byId('kickoffInput').value;
+      if(!home || !away || !kick){ alert("Fill Home, Away, Kickoff."); return; }
+      const payload = { weekId: state.weekId, day, home, away, kickoff: new Date(kick).toISOString(), winner: "" };
+      await addDoc(collection(db,"games"), payload);
+      byId('homeInput').value=""; byId('awayInput').value=""; byId('kickoffInput').value="";
+      await loadWeek();
+    }
+
+    async function saveChanges(){
+      const rows = [...document.querySelectorAll('.trow')];
+      let count = 0;
+      for(const r of rows){
+        const id = r.getAttribute('data-id');
+        const payload = {
+          day: r.querySelector('[data-field="day"]').value.trim(),
+          kickoff: r.querySelector('[data-field="kickoff"]').value ? new Date(r.querySelector('[data-field="kickoff"]').value).toISOString() : "",
+          home: r.querySelector('[data-field="home"]').value.trim(),
+          away: r.querySelector('[data-field="away"]').value.trim(),
+          winner: r.querySelector('[data-field="winner"]').value || ""
+        };
+        await updateDoc(doc(db,"games", id), payload);
+        count++;
+      }
+      setStatus(`Saved ${count} game(s).`);
+    }
+
+    function setStatus(m){ byId('status').textContent = m || ""; }
+  </script>
+</body>
+</html>
