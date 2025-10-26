@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v7)</title>
+  <title>Admin Importer — Games Only (v7.4)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -55,6 +55,10 @@
     .drop.drag{outline:2px dashed var(--accent)}
   
   #impRunBtn, #impPreviewBtn { pointer-events:auto; position: relative; z-index: 2; }
+
+  .modal{pointer-events:auto;}
+  .modal .sheet{z-index:9999;}
+  #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10000; position:relative;}
 </style>
 </head>
 <body>
@@ -80,7 +84,7 @@
             <option value="21">Week 21</option><option value="22">Week 22</option>
           </select>
         </label>
-        <button id="refreshBtn" type="button">Refresh</button>
+        <button id="refreshBtn" type="button" tabindex="0" type="button">Refresh</button>
       </div>
       <span class="divider"></span>
       <div class="group">
@@ -92,9 +96,9 @@
         <label>Home <input id="homeInput" placeholder="Home team" style="min-width:180px"></label>
         <label>Away <input id="awayInput" placeholder="Away team" style="min-width:180px"></label>
         <label>Kickoff <input id="kickoffInput" type="datetime-local"></label>
-        <button id="addGameBtn" type="button">+ Add game</button>
-        <button id="saveChangesBtn" type="button" class="primary">Save Game Changes</button>
-        <button id="openImportBtn" type="button">📥 Import Week (CSV)</button>
+        <button id="addGameBtn" type="button" tabindex="0" type="button">+ Add game</button>
+        <button id="saveChangesBtn" type="button" tabindex="0" type="button" class="primary">Save Game Changes</button>
+        <button id="openImportBtn" type="button" tabindex="0" type="button">📥 Import Week (CSV)</button>
       </div>
     </div>
 
@@ -105,7 +109,7 @@
       <div id="rows"></div>
     </div>
 
-    <div id="status" class="status"></div>
+    <div id="status" class="status"></div><div class="role" id="bootBadge" style="margin-top:6px; display:inline-block;">JS Loaded</div>
 
     <div class="card">
       <strong>Debug</strong>
@@ -120,7 +124,7 @@
       <div style="display:flex; align-items:center; gap:10px">
         <h3>Import Week — Games Only</h3>
         <div class="sp"></div>
-        <button id="closeImportBtn" type="button">Close</button>
+        <button id="closeImportBtn" type="button" tabindex="0" type="button">Close</button>
       </div>
       <div class="card" style="margin-top:8px">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center">
@@ -134,7 +138,7 @@
             <button id="genTplBtn" type="button">Generate template</button>
           </div>
           <div class="sp"></div>
-          <div><button id="impPreviewBtn" type="button">Preview</button> <button id="impRunBtn" type="button" class="primary">Import</button></div>
+          <div><button id="impPreviewBtn" type="button" tabindex="0" type="button">Preview</button> <button id="impRunBtn" type="button" tabindex="0" type="button" class="primary">Import</button></div>
         </div>
         <div id="drop" class="drop" style="margin-top:10px">
           Drag & drop your CSV here (or use the file picker above)
@@ -234,7 +238,7 @@
     byId('openImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.add('open'); });
     byId('closeImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.remove('open'); });
     byId('impPreviewBtn').addEventListener('click', async ()=>{ const f = byId('impFile').files[0]; state.parsed = await parseCsvFile(f); if(state.parsed) renderPreview(state.parsed); });
-    byId('impRunBtn').addEventListener('click', ()=>{ console.log('impRunBtn clicked'); runImport(); });
+    const impBtn = byId('impRunBtn'); impBtn.disabled=false; impBtn.addEventListener('click', ()=>{ console.log('impRunBtn clicked'); runImport(); });
     byId('genTplBtn').addEventListener('click', generateTemplate);
 
     // Drag & drop
@@ -288,9 +292,9 @@
           <option value="away" ${game.winner==="away"?"selected":""}>away</option>
         </select>
         <div class="right">
-          <button class="btn-danger" data-action="delete" type="button">Delete</button>
+          <button class="btn-danger" data-action="delete" type="button" tabindex="0" type="button">Delete</button>
         </div>`;
-      node.querySelector('[data-action="delete"]').addEventListener('click', async ()=>{
+      node.querySelector('[data-action="delete" type="button" tabindex="0"]').addEventListener('click', async ()=>{
         if(!confirm("Delete this game?")) return;
         await deleteDoc(doc(db, "games", game.id));
         await loadWeek();
