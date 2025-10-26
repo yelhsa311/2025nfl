@@ -42,7 +42,7 @@
     /* Modal */
     .modal{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index:50}
     .modal.open{display:flex}
-    .modal .sheet{width:min(960px, 96vw); max-height:92vh; overflow:auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px}
+    .modal .sheet{ position:relative;width:min(960px, 96vw); max-height:92vh; overflow:auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px}
     .modal h3{margin:0 0 8px 0}
     progress{width:100%; height:14px}
     #log{white-space:pre-wrap; background:#0c111b; border:1px solid var(--border);
@@ -53,7 +53,9 @@
     .warn{color:#f59e0b}
     .drop{border:1px dashed var(--border); border-radius:12px; padding:12px; text-align:center; background:#0c111b55}
     .drop.drag{outline:2px dashed var(--accent)}
-  </style>
+  
+  #impRunBtn, #impPreviewBtn { pointer-events:auto; position: relative; z-index: 2; }
+</style>
 </head>
 <body>
   <header>
@@ -78,7 +80,7 @@
             <option value="21">Week 21</option><option value="22">Week 22</option>
           </select>
         </label>
-        <button id="refreshBtn">Refresh</button>
+        <button id="refreshBtn" type="button">Refresh</button>
       </div>
       <span class="divider"></span>
       <div class="group">
@@ -90,9 +92,9 @@
         <label>Home <input id="homeInput" placeholder="Home team" style="min-width:180px"></label>
         <label>Away <input id="awayInput" placeholder="Away team" style="min-width:180px"></label>
         <label>Kickoff <input id="kickoffInput" type="datetime-local"></label>
-        <button id="addGameBtn">+ Add game</button>
-        <button id="saveChangesBtn" class="primary">Save Game Changes</button>
-        <button id="openImportBtn">📥 Import Week (CSV)</button>
+        <button id="addGameBtn" type="button">+ Add game</button>
+        <button id="saveChangesBtn" type="button" class="primary">Save Game Changes</button>
+        <button id="openImportBtn" type="button">📥 Import Week (CSV)</button>
       </div>
     </div>
 
@@ -118,7 +120,7 @@
       <div style="display:flex; align-items:center; gap:10px">
         <h3>Import Week — Games Only</h3>
         <div class="sp"></div>
-        <button id="closeImportBtn">Close</button>
+        <button id="closeImportBtn" type="button">Close</button>
       </div>
       <div class="card" style="margin-top:8px">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center">
@@ -129,10 +131,10 @@
           <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
           <div class="note">CSV columns: <code>day,kickoff_local,home,away,winner</code></div>
           <div>
-            <button id="genTplBtn">Generate template</button>
+            <button id="genTplBtn" type="button">Generate template</button>
           </div>
           <div class="sp"></div>
-          <div><button id="impPreviewBtn">Preview</button> <button id="impRunBtn" class="primary">Import</button></div>
+          <div><button id="impPreviewBtn" type="button">Preview</button> <button id="impRunBtn" type="button" class="primary">Import</button></div>
         </div>
         <div id="drop" class="drop" style="margin-top:10px">
           Drag & drop your CSV here (or use the file picker above)
@@ -232,7 +234,7 @@
     byId('openImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.add('open'); });
     byId('closeImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.remove('open'); });
     byId('impPreviewBtn').addEventListener('click', async ()=>{ const f = byId('impFile').files[0]; state.parsed = await parseCsvFile(f); if(state.parsed) renderPreview(state.parsed); });
-    byId('impRunBtn').addEventListener('click', runImport);
+    byId('impRunBtn').addEventListener('click', ()=>{ console.log('impRunBtn clicked'); runImport(); });
     byId('genTplBtn').addEventListener('click', generateTemplate);
 
     // Drag & drop
@@ -286,7 +288,7 @@
           <option value="away" ${game.winner==="away"?"selected":""}>away</option>
         </select>
         <div class="right">
-          <button class="btn-danger" data-action="delete">Delete</button>
+          <button class="btn-danger" data-action="delete" type="button">Delete</button>
         </div>`;
       node.querySelector('[data-action="delete"]').addEventListener('click', async ()=>{
         if(!confirm("Delete this game?")) return;
