@@ -14,6 +14,19 @@
   button.primary{outline:2px solid var(--accent)}
   .grid{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
   .match{padding:10px;border:1px dashed var(--border);border-radius:10px}
+
+  <!-- Auth HUD (tiny badge + buttons) -->
+  <style>
+    .auth-hud{position:fixed;right:12px;top:12px;background:#0f172a;color:#e6edf3;border:1px solid #1f2937;border-radius:10px;padding:8px 10px;font:12px/1.4 system-ui;z-index:9999;box-shadow:0 2px 10px #0005}
+    .auth-hud button{background:#1f6feb;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:600;cursor:pointer;margin-left:6px}
+    .auth-hud .muted{opacity:.75}
+  </style>
+  <div id="authHud" class="auth-hud" hidden>
+    <span id="authStatus" class="muted">checking auth…</span>
+    <button id="btnGoogle" hidden>Sign in with Google</button>
+    <button id="btnSignOut" hidden>Sign out</button>
+  </div>
+
   
   .team{
     position:relative;
@@ -213,6 +226,95 @@
 </div>
 
 <script type="module">
+// ---- Firebase v10 modular imports ----
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInWithPopup, signInWithRedirect,
+  GoogleAuthProvider, signOut, signInAnonymously
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
+// ---- YOUR config (as you sent) ----
+const firebaseConfig = {
+  apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+  authDomain: "nfl-picks-b83c2.firebaseapp.com",
+  projectId: "nfl-picks-b83c2",
+  storageBucket: "nfl-picks-b83c2.appspot.com",
+  messagingSenderId: "802058909501",
+  appId: "1:802058909501:web:bb935c188891934de07754",
+  measurementId: "G-MSJHYZ4VG2"
+};
+
+// ---- Initialize app exactly once ----
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+// ---- HUD elements ----
+const hud = document.getElementById('authHud');
+const statusEl = document.getElementById('authStatus');
+const btnGoogle = document.getElementById('btnGoogle');
+const btnSignOut = document.getElementById('btnSignOut');
+
+// Toggle this to allow anonymous fallback if you want it:
+const ALLOW_ANON_FALLBACK = false;
+
+// Show HUD always (handy while fixing)
+hud.hidden = false;
+
+// Helper: show status
+function setStatus(text, muted=false){ statusEl.textContent = text; statusEl.classList.toggle('muted', muted); }
+
+// Try Google sign-in (popup → redirect fallback)
+async function signInGoogleSmart(){
+  const provider = new GoogleAuthProvider();
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    // Popup blocked or not allowed → use redirect
+    console.warn('Popup failed, using redirect:', e.code, e.message);
+    await signInWithRedirect(auth, provider);
+  }
+}
+
+// Wire buttons
+btnGoogle.onclick = () => signInGoogleSmart();
+btnSignOut.onclick = () => signOut(auth).catch(console.error);
+
+// Observe auth state
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    // Signed in
+    const name = user.displayName || user.email || user.uid;
+    setStatus(`Signed in as ${name}`);
+    btnGoogle.hidden = true;
+    btnSignOut.hidden = false;
+    console.log('[auth] user:', { uid: user.uid, email: user.email, displayName: user.displayName });
+
+    // ✅ your app can proceed to read Firestore now
+  } else {
+    // Not signed in
+    setStatus('Not signed in', true);
+    btnGoogle.hidden = false;
+    btnSignOut.hidden = true;
+
+    // Optional: anonymous fallback
+    if (ALLOW_ANON_FALLBACK) {
+      try {
+        await signInAnonymously(auth);
+        setStatus('Signed in anonymously', true);
+      } catch (e) {
+        console.warn('Anonymous sign-in failed:', e.code, e.message);
+      }
+    }
+  }
+});
+
+// Extra diagnostics: log auth domain and guardrails
+console.log('[auth] authDomain:', firebaseConfig.authDomain);
+console.log('[auth] page origin:', location.origin);
+// If Google sign-in still fails with "auth/unauthorized-domain":
+//  - confirm Authorized domains include: yelhs311.github.io, localhost, 127.0.0.1
+//  - make sure you cleared cookies or tried Incognito.
+  
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 
   import {
