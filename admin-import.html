@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Import Week & Picks — Family NFL Picks</title>
+  <style>
+    :root{
+      --bg:#0e1116; --panel:#141922; --panel2:#1b2230;
+      --text:#ebf0f7; --muted:#96a0b5; --accent:#5aa6ff;
+      --border:#232b3a; --danger:#ef4444; --ok:#22c55e;
+      --input:#0f1420;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; background:var(--bg); color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;}
+    header{display:flex; gap:12px; align-items:center; padding:16px 20px;
+      background:var(--panel); position:sticky; top:0; z-index:10; border-bottom:1px solid var(--border);}
+    header .sp{flex:1}
+    a{color:var(--accent); text-decoration:none}
+    .wrap{max-width:980px; margin:0 auto; padding:20px}
+    .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin-bottom:16px}
+    label{color:var(--muted); font-size:14px; display:flex; gap:8px; align-items:center}
+    input, select{background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 10px}
+    button{background:#1a2434; color:#e8f0ff; border:1px solid var(--border); padding:8px 12px; border-radius:10px; cursor:pointer}
+    button.primary{background:var(--accent); color:#08101e; border-color:#3b82f6}
+    .grid{display:grid; grid-template-columns: 1fr 1fr; gap:10px}
+    table{width:100%; border-collapse:collapse; font-size:14px}
+    th,td{border:1px solid var(--border); padding:6px 8px}
+    th{background:var(--panel2); color:var(--muted)}
+    .status{color:var(--muted); font-size:13px}
+    .danger{color:var(--danger)}
+    .ok{color:var(--ok)}
+    .hide{display:none}
+    .note{color:var(--muted); font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/admin-grid.html">← Back to Admin</a>
+    <strong>Import Week & Picks</strong>
+    <div class="sp"></div>
+    <div id="userTag"></div>
+  </header>
+  <div class="wrap">
+
+    <div class="card grid">
+      <label>Season <input id="season" type="number" min="2000" max="2100" value="2025" style="width:110px"></label>
+      <label>Week #
+        <select id="week"></select>
+      </label>
+      <label><input id="replace" type="checkbox"> Replace games for this week (delete existing first)</label>
+      <div></div>
+      <label>CSV File
+        <input id="file" type="file" accept=".csv">
+      </label>
+      <div class="note">CSV format: day, kickoff_local (YYYY-MM-DD HH:MM), home, away, winner, then one column per user email with picks (home/away/blank).</div>
+      <div><a href="/week-template.csv" download>Download template</a></div>
+      <div class="sp"></div>
+      <div><button id="previewBtn">Preview</button> <button id="importBtn" class="primary">Import</button></div>
+    </div>
+
+    <div id="previewCard" class="card hide">
+      <strong>Preview</strong>
+      <div class="status" id="previewInfo"></div>
+      <div style="max-height:360px; overflow:auto; margin-top:8px">
+        <table id="previewTable"></table>
+      </div>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import { getFirestore, collection, query, where, orderBy, getDocs, addDoc, deleteDoc, doc, setDoc, serverTimestamp } 
+      from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+    const cfg = {
+      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+      authDomain: "nfl-picks-b83c2.firebaseapp.com",
+      projectId: "nfl-picks-b83c2",
+      storageBucket: "nfl-picks-b83c2.appspot.com",
+      messagingSenderId: "802058909501",
+      appId: "1:802058909501:web:bb935c188891934de07754",
+      measurementId: "G-MSJHYZ4VG2"
+    };
+
+    const app = initializeApp(cfg);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const ADMIN_EMAILS = ["yelhsa311@gmail.com"]; // keep simple
+
+    const fmt2 = n => String(n).padStart(2,'0');
+    const weekId = (season, w) => `${season}-Week-${fmt2(w)}`;
+    const uidFromEmail = email => (email||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,64);
+
+    const $ = sel => document.querySelector(sel);
+    function setStatus(m){ $("#status").textContent = m || ""; }
+    function show(el, yes){ el.classList.toggle("hide", !yes); }
+
+    // fill week options
+    const wk = $("#week");
+    for(let i=1;i<=22;i++){ const o=document.createElement("option"); o.value=String(i); o.textContent=`${i}`; wk.appendChild(o); }
+    wk.value="8";
+
+    onAuthStateChanged(auth, (user)=>{
+      if(!user) { location.replace("/index.html"); return; }
+      $("#userTag").textContent = user.email || "";
+      if(!ADMIN_EMAILS.includes((user.email||"").toLowerCase())){
+        alert("Admins only."); location.replace("/index.html");
+      }
+    });
+
+    let parsed = null;
+
+    $("#previewBtn").addEventListener("click", async ()=>{
+      parsed = await parseCsvFile($("#file").files[0]);
+      if(!parsed) return;
+      renderPreview(parsed);
+    });
+
+    $("#importBtn").addEventListener("click", async ()=>{
+      if(!parsed){ alert("Preview the CSV first."); return; }
+      const season = Number($("#season").value||2025);
+      const wn = Number($("#week").value||1);
+      const wid = weekId(season, wn);
+      const replace = $("#replace").checked;
+
+      setStatus("Importing…");
+
+      // Optionally delete existing games for the week
+      if(replace){
+        const qs = query(collection(db,"games"), where("weekId","==", wid));
+        const snap = await getDocs(qs);
+        const dels = [];
+        snap.forEach(d=> dels.push(deleteDoc(doc(db,"games", d.id))));
+        for(const p of dels) await p;
+      }
+
+      // 1) Create games first (collect IDs)
+      const gameIds = [];
+      for(const g of parsed.games){
+        const payload = { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso };
+        const ref = await addDoc(collection(db,"games"), payload);
+        gameIds.push(ref.id);
+      }
+
+      // 2) Write picks per user as a single doc per user/week
+      for(const [email, picksArr] of Object.entries(parsed.picksByUser)){
+        const pm = {};
+        for(let i=0;i<gameIds.length;i++){
+          const choice = (picksArr[i]||"").toLowerCase();
+          if(choice==="home" || choice==="away"){
+            pm[gameIds[i]] = choice;
+          }
+        }
+        const uid = uidFromEmail(email);
+        const pRef = doc(db, "picks", uid, "weeks", wid);
+        await setDoc(pRef, { picks: pm, savedAt: serverTimestamp() }, { merge: true });
+      }
+
+      setStatus("✅ Import complete.");
+      alert("Import complete.");
+    });
+
+    function renderPreview(p){
+      $("#previewInfo").textContent = `Games: ${p.games.length} • Users: ${p.users.length}`;
+      const tbl = $("#previewTable");
+      tbl.innerHTML = "";
+      const trh = document.createElement("tr");
+      ["day","kickoff_local","home","away","winner", ...p.users].forEach(h=>{
+        const th=document.createElement("th"); th.textContent=h; trh.appendChild(th);
+      });
+      tbl.appendChild(trh);
+      for(const r of p.rows){
+        const tr=document.createElement("tr");
+        [...r.std, ...r.userVals].forEach(v=>{ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); });
+        tbl.appendChild(tr);
+      }
+      show($("#previewCard"), true);
+    }
+
+    async function parseCsvFile(file){
+      if(!file){ alert("Pick a CSV file first."); return null; }
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if(lines.length<2){ alert("CSV has no data rows."); return null; }
+      const headers = splitCsvLine(lines[0]);
+      // standard columns:
+      const std = ["day","kickoff_local","home","away","winner"];
+      for(let i=0;i<std.length;i++){
+        if((headers[i]||"").toLowerCase()!==std[i]){
+          alert("Expected first columns: day,kickoff_local,home,away,winner");
+          return null;
+        }
+      }
+      const users = headers.slice(std.length).map(h=>h.trim().toLowerCase()).filter(Boolean);
+      const games = [];
+      const rows = [];
+      const picksByUser = Object.fromEntries(users.map(u=>[u,[]]));
+
+      for(let li=1; li<lines.length; li++){
+        const cols = splitCsvLine(lines[li]);
+        if(cols.length===0) continue;
+        const [day, kickoffLocal, home, away, winner, ...userVals] = cols;
+        const kickoffIso = kickoffLocal ? new Date(kickoffLocal.replace(" ","T")).toISOString() : "";
+        games.push({ day, home, away, winner: (winner||"").toLowerCase(), kickoffIso });
+        rows.push({ std:[day,kickoffLocal,home,away,winner], userVals });
+
+        users.forEach((u, idx)=>{
+          const v = (userVals[idx]||"").toLowerCase();
+          picksByUser[u].push(v);
+        });
+      }
+
+      return { headers, users, games, picksByUser, rows };
+    }
+
+    function splitCsvLine(line){
+      // minimal CSV split (supports quotes)
+      const out=[]; let cur=""; let inQ=false;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch=='"'){ 
+          if(inQ && line[i+1]=='"'){ cur+='"'; i++; }
+          else inQ=!inQ;
+        } else if(ch=="," && !inQ){ out.push(cur); cur=""; }
+        else cur+=ch;
+      }
+      out.push(cur);
+      return out.map(s=>s.trim());
+    }
+  </script>
+</body>
+</html>
