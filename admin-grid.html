@@ -300,24 +300,37 @@
       return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
     }
 
-    // --- Data: Games & Picks ---
+    import { collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+    
     async function loadWeek(){
       setStatus("Loading…");
-      // Fetch games for week
-      const q = query(collection(db, "games"), where("weekId", "==", state.weekId), orderBy("kickoff"));
+    
+      // 1) Fetch without orderBy (no index required)
+      const q = query(collection(db, "games"), where("weekId", "==", state.weekId));
       const snap = await getDocs(q);
+    
+      // 2) Build array and sort locally by kickoff ISO
       state.games = [];
-      snap.forEach(d=>{
+      snap.forEach(d => {
         const data = d.data();
         state.games.push({
           id: d.id,
           day: data.day || "",
-          kickoff: data.kickoff || "",
+          kickoff: data.kickoff || "",   // ISO string from importer
           home: data.home || "",
           away: data.away || "",
           winner: data.winner || ""
         });
       });
+
+  // Sort by kickoff ascending (handles ISO or empty)
+  state.games.sort((a,b) => new Date(a.kickoff) - new Date(b.kickoff));
+
+  console.log("[AdminGrid] weekId:", state.weekId, "docs:", state.games.length);
+  renderGrid();
+  setStatus(`Adds to ${state.weekId} • ${state.games.length} game(s)`);
+}
+
 
       // Load picks for active user (single-column mode)
       state.picksByUser.clear();
