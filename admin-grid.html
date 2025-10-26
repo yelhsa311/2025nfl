@@ -95,7 +95,7 @@
       </div>
     </div>
 
-    <!-- CLEANUP TOOLBAR (moved OUT of <script>) -->
+    <!-- Cleanup toolbar -->
     <div class="row" style="margin-top:10px; gap:10px;">
       <button id="removeDupesBtn">Remove Duplicates</button>
       <button id="clearGamesBtn">Clear All Games for Week</button>
@@ -115,9 +115,12 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch, query, orderBy, addDoc, deleteDoc } 
-    from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  import {
+    getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch,
+    query, orderBy, addDoc, deleteDoc, collectionGroup, deleteField
+  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
+  // --- Firebase config (yours) ---
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
     authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -127,13 +130,14 @@
     appId: "1:802058909501:web:bb935c188891934de07754"
   };
 
+  // --- Init ---
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
 
   // --- Admin allowlist ---
-  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
-  const ADMIN_EMAILS = ["yelhsa311@gmail.com"];
+  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];   // add more UIDs here
+  const ADMIN_EMAILS = ["yelhsa311@gmail.com"];          // or allow by email
 
   // --- Helpers ---
   const el = s => document.querySelector(s);
@@ -146,13 +150,13 @@
 
   const state = {
     weekId: null,
-    users: [],
-    games: [],
-    picksByUser: new Map(),
+    users: [],                 // emails (columns)
+    games: [],                 // [{id, day, home, away, kickoffTs, winner}]
+    picksByUser: new Map(),    // email -> { [gameId]: "home"|"away" }
     dirty: { games: new Set(), picks: new Set() }
   };
 
-  // --- Auth flow (no empty click overrides, no illegal await) ---
+  // --- Auth flow ---
   onAuthStateChanged(auth, (user)=>{
     if(!user){
       el("#auth").style.display="";
@@ -172,8 +176,7 @@
         `Admins only.\n\nAdd this UID to ADMIN_UIDS or email to ADMIN_EMAILS:\n` +
         `UID: ${user.uid}\nEmail: ${user.email}`
       );
-      // Keep them signed in if you prefer; or sign them out without await:
-      signOut(auth);
+      signOut(auth); // Non-blocking; keeps UI predictable
       return;
     }
 
@@ -203,14 +206,14 @@
     loadWeek();
   });
 
-  // Real sign-in handler (kept)
+  // Real sign-in handler
   byId("signInBtn").onclick = async ()=>{
     try{
       await signInWithEmailAndPassword(auth, byId("email").value.trim(), byId("pass").value);
     }catch(e){ alert(e.message); }
   };
 
-  // --- Users prefs ---
+  // Users prefs
   function saveUsersPref(){
     localStorage.setItem("adminGridUsers:"+state.weekId, JSON.stringify(state.users));
     localStorage.setItem("adminGridUsers:GLOBAL", JSON.stringify(Array.from(new Set(state.users))));
@@ -231,7 +234,7 @@
     renderGrid();
   }
 
-  // --- Add Game ---
+  // Add Game
   const toMs = (val) => {
     if (!val) return null; const ms = Date.parse(val); return Number.isFinite(ms) ? ms : null;
   };
@@ -259,7 +262,7 @@
     }
   }
 
-  // --- Load games + picks ---
+  // Load games + picks
   async function loadWeek(){
     try{
       setStatus("Loading…");
@@ -384,11 +387,12 @@
     tb.querySelectorAll("button[data-del]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const gid = btn.dataset.del;
-        if (confirm("Delete this game?")) {
-          await deleteDoc(doc(db, "weeks", state.weekId, "games", gid));
-          setStatus(`Deleted ${gid}`);
-          await loadWeek();
-        }
+        if (!confirm("Delete this game?")) return;
+
+        await deleteDoc(doc(db, "weeks", state.weekId, "games", gid));
+        await pruneGamesFromAllPicks(state.weekId, [gid]);   // prune stale picks
+        setStatus(`Deleted ${gid}`);
+        await loadWeek();
       });
     });
   }
@@ -409,6 +413,7 @@
   async function saveAll(){
     try{
       setStatus("Saving…");
+      // winners (batch)
       const batch = writeBatch(db);
       const gameIds = [...state.dirty.games];
       for (const gid of gameIds){
@@ -418,6 +423,7 @@
       }
       await batch.commit();
 
+      // picks (per user)
       let pickDocs=0;
       for (const email of state.dirty.picks){
         const uid = uidFromEmail(email);
@@ -438,25 +444,96 @@
     }
   }
 
+  // ---- PRUNE DELETED GAME IDS FROM ALL USERS' PICKS ----
+  async function pruneGamesFromAllPicks(weekId, gameIds) {
+    if (!gameIds?.length) return;
+    const q = query(collectionGroup(db, "weeks"));
+    const snap = await getDocs(q);
+
+    let batch = writeBatch(db), opCount = 0, totalUpdates = 0;
+    for (const d of snap.docs) {
+      const data = d.data();
+      if (data.weekId !== weekId) continue;
+
+      const updates = {};
+      let hasAny = false;
+      for (const gid of gameIds) {
+        if (data.picks && Object.prototype.hasOwnProperty.call(data.picks, gid)) {
+          updates[`picks.${gid}`] = deleteField();
+          hasAny = true;
+        }
+      }
+      if (!hasAny) continue;
+
+      updates.updatedAt = Date.now();
+      batch.update(d.ref, updates);
+      opCount++; totalUpdates++;
+
+      if (opCount >= 450) {
+        await batch.commit();
+        batch = writeBatch(db);
+        opCount = 0;
+      }
+    }
+    if (opCount > 0) await batch.commit();
+
+    setStatus(`Pruned ${totalUpdates} pick entr${totalUpdates===1?'y':'ies'} referencing deleted game(s).`);
+  }
+
   // --- ADMIN CLEANUP TOOLS ---
   document.getElementById("removeDupesBtn").onclick = async () => {
     if (!confirm("Remove duplicate games for this week?")) return;
+
+    // Load all games
     const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-    const seen = new Map();
-    const toDelete = [];
-    const norm = s => (s||"").toLowerCase().trim();
+
+    // Build groups by signature and keep the best candidate:
+    // - Prefer a doc that has a winner set
+    // - Otherwise, keep the earliest createdAt
+    const norm = s => (s||"").trim().toLowerCase();
+    const groups = new Map(); // sig -> { keepRef, keepData, dups: [ref] }
 
     gamesSnap.forEach(d => {
       const g = d.data();
-      const key = `${norm(g.day||"unknown")}|${norm(g.home)}|${norm(g.away)}|${Number.isFinite(g.kickoffTs)?g.kickoffTs:0}`;
-      if (seen.has(key)) {
-        toDelete.push(d.ref);
+      const sig = `${norm(g.day||"unknown")}|${norm(g.home)}|${norm(g.away)}|${Number.isFinite(g.kickoffTs)?g.kickoffTs:0}`;
+      if (!groups.has(sig)) {
+        groups.set(sig, { keepRef: d.ref, keepData: g, dups: [] });
       } else {
-        seen.set(key, d.ref);
+        const cur = groups.get(sig);
+        const a = cur.keepData, b = g;
+        const aHasWin = a?.winner === "home" || a?.winner === "away";
+        const bHasWin = b?.winner === "home" || b?.winner === "away";
+
+        let keepCurrent = true;
+        if (bHasWin && !aHasWin) keepCurrent = false;
+        else if (aHasWin && !bHasWin) keepCurrent = true;
+        else {
+          const ac = a?.createdAt ?? Number.MAX_SAFE_INTEGER;
+          const bc = b?.createdAt ?? Number.MAX_SAFE_INTEGER;
+          keepCurrent = ac <= bc;
+        }
+
+        if (keepCurrent) {
+          // New doc is duplicate
+          cur.dups.push(d.ref);
+        } else {
+          // Swap: keep new, old becomes duplicate
+          cur.dups.push(cur.keepRef);
+          cur.keepRef = d.ref;
+          cur.keepData = b;
+        }
+        groups.set(sig, cur);
       }
     });
 
+    // Collect IDs to prune from picks, delete duplicates
+    const toDelete = [];
+    groups.forEach(grp => grp.dups.forEach(ref => toDelete.push(ref)));
+
+    const ids = toDelete.map(ref => ref.id);
     for (const ref of toDelete) await deleteDoc(ref);
+
+    await pruneGamesFromAllPicks(state.weekId, ids);
     setStatus(`Removed ${toDelete.length} duplicate game(s).`);
     await loadWeek();
   };
@@ -464,8 +541,12 @@
   document.getElementById("clearGamesBtn").onclick = async () => {
     if (!confirm(`Delete ALL games for ${state.weekId}?`)) return;
     const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+    const ids = gamesSnap.docs.map(d => d.id);
+
     let count = 0;
     for (const docSnap of gamesSnap.docs) { await deleteDoc(docSnap.ref); count++; }
+
+    await pruneGamesFromAllPicks(state.weekId, ids);
     setStatus(`Deleted ${count} games for ${state.weekId}.`);
     await loadWeek();
   };
