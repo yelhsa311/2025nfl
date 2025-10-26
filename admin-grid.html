@@ -107,7 +107,8 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch, query, orderBy, addDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  import { getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch, query, orderBy, addDoc, deleteDoc } 
+    from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
@@ -233,6 +234,12 @@
     }
   }
 
+  <div class="row" style="margin-top:10px; gap:10px;">
+  <button id="removeDupesBtn">Remove Duplicates</button>
+  <button id="clearGamesBtn">Clear All Games for Week</button>
+  </div>
+
+  
   // Load games + picks
   async function loadWeek(){
     try{
@@ -340,6 +347,7 @@
         <td>${g.home}</td>
         <td>${g.away}</td>
         <td>${winnerCell(g)}</td>
+        <td><button class="btn-danger" data-del="${g.id}">Delete</button></td>
       `;
 
       for (const email of state.users){
@@ -351,6 +359,17 @@
       }
       tb.appendChild(tr);
     }
+  // Bind delete buttons AFTER rows are created
+  tb.querySelectorAll("button[data-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const gid = btn.dataset.del;
+      if (confirm("Delete this game?")) {
+        await deleteDoc(doc(db, "weeks", state.weekId, "games", gid));
+        setStatus(`Deleted ${gid}`);
+        await loadWeek(); // refresh grid to remove deleted row
+      }
+    });
+  });    
   }
 
   // track winner changes
@@ -398,6 +417,38 @@
       alert("Save error: " + (e.message||e));
     }
   }
+  // --- ADMIN CLEANUP TOOLS ---
+  
+  document.getElementById("removeDupesBtn").onclick = async () => {
+    if (!confirm("Remove duplicate games for this week?")) return;
+    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+    const seen = new Map();
+    const toDelete = [];
+    gamesSnap.forEach(d => {
+      const g = d.data();
+      const key = `${(g.day||"").toLowerCase()}|${(g.home||"").toLowerCase()}|${(g.away||"").toLowerCase()}|${g.kickoffTs||0}`;
+      if (seen.has(key)) {
+        toDelete.push(d.ref);
+      } else {
+        seen.set(key, d.ref);
+      }
+    });
+    for (const ref of toDelete) await deleteDoc(ref);
+    setStatus(`Removed ${toDelete.length} duplicate game(s).`);
+    await loadWeek();
+  };
+  
+  document.getElementById("clearGamesBtn").onclick = async () => {
+    if (!confirm(`Delete ALL games for ${state.weekId}?`)) return;
+    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+    let count = 0;
+    for (const docSnap of gamesSnap.docs) {
+      await deleteDoc(docSnap.ref);
+      count++;
+    }
+    setStatus(`Deleted ${count} games for ${state.weekId}.`);
+    await loadWeek();
+  };  
 </script>
 </body>
 </html>
