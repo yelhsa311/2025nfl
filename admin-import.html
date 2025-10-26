@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v7)</title>
+  <title>Admin Importer — Games Only (v8.0)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -27,7 +27,6 @@
     button.primary{background:var(--accent); color:#08101e; border-color:#3b82f6}
     button.btn-danger{background:var(--danger); color:white; border-color:#ef4444}
     .divider{width:2px; height:26px; background:var(--border); margin:0 6px; border-radius:2px}
-    .chip{display:inline-flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px; background:var(--panel); border:1px solid var(--border); border-radius:12px; margin-top:10px}
     .table{margin-top:14px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--panel)}
     .thead, .trow{display:grid; grid-template-columns: 110px 220px 1fr 1fr 140px 90px; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding:10px}
     .thead{background:var(--panel-2); color:var(--muted); font-weight:600}
@@ -35,14 +34,12 @@
     .trow input, .trow select{width:100%}
     .right{display:flex; gap:8px; justify-content:flex-end}
     .status{color:var(--muted); margin-top:8px; font-size:13px}
-    .note{color:var(--muted); font-size:12px}
     .card{margin-top:14px; border:1px solid var(--border); border-radius:12px; background:var(--panel); padding:12px}
     code{background:#0c111b; border:1px solid var(--border); padding:2px 6px; border-radius:8px}
     #debugList{font-size:13px; color:var(--muted); max-height:180px; overflow:auto}
-    /* Modal */
     .modal{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index:50}
     .modal.open{display:flex}
-    .modal .sheet{ position:relative;width:min(960px, 96vw); max-height:92vh; overflow:auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px}
+    .modal .sheet{width:min(960px, 96vw); max-height:92vh; overflow:auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px; position:relative}
     .modal h3{margin:0 0 8px 0}
     progress{width:100%; height:14px}
     #log{white-space:pre-wrap; background:#0c111b; border:1px solid var(--border);
@@ -50,33 +47,14 @@
     table{width:100%; border-collapse:collapse; font-size:14px}
     th,td{border:1px solid var(--border); padding:6px 8px}
     th{background:var(--panel-2); color:var(--muted)}
-    .warn{color:#f59e0b}
     .drop{border:1px dashed var(--border); border-radius:12px; padding:12px; text-align:center; background:#0c111b55}
-    .drop.drag{outline:2px dashed var(--accent)}
-  
-  #impRunBtn, #impPreviewBtn { pointer-events:auto; position: relative; z-index: 2; }
-
-  .modal{pointer-events:auto;}
-  .modal .sheet{z-index:9999;}
-  #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10000; position:relative;}
-
-  .modal{pointer-events:auto;}
-  .modal .sheet{z-index:9999; position:relative;}
-  #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10000; position:relative;}
-
-  #openImportBtn{position:relative; z-index:2; pointer-events:auto;}
-
-  #openImportBtn{position:relative; z-index:10010; pointer-events:auto;}
-  header, .toolbar{position:relative; z-index:1000;}
-  .modal{pointer-events:auto;}
-  .modal .sheet{z-index:10050; position:relative;}
-  #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10060; position:relative;}
-</style>
+    #openImportBtn{position:relative; z-index:3}
+  </style>
 </head>
 <body>
   <header>
-    <a href="#" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.8</span></strong>
+    <a href="./index.html" id="backLink">← Back to App</a>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.0</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -96,7 +74,7 @@
             <option value="21">Week 21</option><option value="22">Week 22</option>
           </select>
         </label>
-        <button id="refreshBtn" type="button" tabindex="0" type="button">Refresh</button>
+        <button id="refreshBtn" type="button">Refresh</button>
       </div>
       <span class="divider"></span>
       <div class="group">
@@ -108,9 +86,9 @@
         <label>Home <input id="homeInput" placeholder="Home team" style="min-width:180px"></label>
         <label>Away <input id="awayInput" placeholder="Away team" style="min-width:180px"></label>
         <label>Kickoff <input id="kickoffInput" type="datetime-local"></label>
-        <button id="addGameBtn" type="button" tabindex="0" type="button">+ Add game</button>
-        <button id="saveChangesBtn" type="button" tabindex="0" type="button" class="primary">Save Game Changes</button>
-        <button id="openImportBtn" type="button" tabindex="0" type="button">📥 Import Week (CSV)</button>
+        <button id="addGameBtn" type="button">+ Add game</button>
+        <button id="saveChangesBtn" type="button" class="primary">Save Game Changes</button>
+        <button id="openImportBtn" type="button">📥 Import Week (CSV)</button>
       </div>
     </div>
 
@@ -121,7 +99,8 @@
       <div id="rows"></div>
     </div>
 
-    <div id="status" class="status"></div><div class="role" id="bootBadge" style="margin-top:6px; display:inline-block;">JS Loaded</div>
+    <div id="status" class="status"></div>
+    <div class="role" id="bootBadge" style="margin-top:6px; display:inline-block;">JS Loaded</div>
 
     <div class="card">
       <strong>Debug</strong>
@@ -130,13 +109,13 @@
     </div>
   </div>
 
-  <!-- Importer Modal (Games only) -->
+  <!-- Importer Modal -->
   <div id="importModal" class="modal" aria-hidden="true">
     <div class="sheet">
       <div style="display:flex; align-items:center; gap:10px">
         <h3>Import Week — Games Only</h3>
         <div class="sp"></div>
-        <button id="closeImportBtn" type="button" tabindex="0" type="button">Close</button>
+        <button id="closeImportBtn" type="button">Close</button>
       </div>
       <div class="card" style="margin-top:8px">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center">
@@ -145,16 +124,12 @@
           <label><input id="impReplace" type="checkbox"> Replace games for this week (delete existing first)</label>
           <label><input id="impDry" type="checkbox"> Dry-run (no writes)</label>
           <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
-          <div class="note">CSV columns: <code>day,kickoff_local,home,away,winner</code></div>
-          <div>
-            <button id="genTplBtn" type="button">Generate template</button>
-          </div>
+          <div class="role">CSV columns: day,kickoff_local,home,away,winner</div>
+          <div><button id="genTplBtn" type="button">Generate template</button></div>
           <div class="sp"></div>
-          <div><button id="impPreviewBtn" type="button" tabindex="0" type="button">Preview</button> <button id="impRunBtn" type="button" tabindex="0" type="button" class="primary">Import</button></div>
+          <div><button id="impPreviewBtn" type="button">Preview</button> <button id="impRunBtn" type="button" class="primary">Import</button></div>
         </div>
-        <div id="drop" class="drop" style="margin-top:10px">
-          Drag & drop your CSV here (or use the file picker above)
-        </div>
+        <div id="drop" class="drop" style="margin-top:10px">Drag & drop your CSV here (or use the file picker above)</div>
       </div>
       <div id="previewCard" class="card" style="display:none">
         <strong>Preview</strong>
@@ -174,35 +149,33 @@
     </div>
   </div>
 
-  
+  <!-- Firebase compat SDKs (no modules) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+
   <script>
-    // Minimal pre-module helper to ensure Import modal can open even if the module fails.
-    (function(){
-      function openModal(){ var m = document.getElementById('importModal'); if(m){ m.classList.add('open'); } }
-      function ready(fn){ if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', fn); } else { fn(); } }
-      ready(function(){
-        var btn = document.getElementById('openImportBtn');
-        var header = document.querySelector('header');
-        var fb = document.getElementById('openImportFallback');
-        if(btn){ btn.addEventListener('click', function(){ console.log('[premod] openImportBtn'); openModal(); }); }
-        if(fb){ fb.addEventListener('click', function(e){ e.preventDefault(); console.log('[premod] fallback'); openModal(); }); }
-        if(header){ header.addEventListener('dblclick', function(){ console.log('[premod] header dblclick'); openModal(); }); }
-        document.addEventListener('keydown', function(e){ if(e.altKey && (e.key==='i' || e.key==='I')){ console.log('[premod] Alt+I'); openModal(); } });
-      });
-    })();
-  </script>
+  (function(){
+    // ===== Utilities =====
+    function $(sel){ return document.querySelector(sel); }
+    function byId(id){ return document.getElementById(id); }
+    const fmt2 = n => String(n).padStart(2,'0');
+    const weekId = (season, w) => season + "-Week-" + fmt2(w);
+    function toLocal(iso){ if(!iso) return ""; const d=new Date(iso);
+      const y=d.getFullYear(), m=fmt2(d.getMonth()+1), da=fmt2(d.getDate()), h=fmt2(d.getHours()), mi=fmt2(d.getMinutes());
+      return y+"-"+m+"-"+da+"T"+h+":"+mi;
+    }
+    function setStatus(m){ byId('status').textContent = m||""; }
+    function impSetStatus(m){ byId('impStatus').textContent = m||""; }
+    function impLog(m){ var L=byId('log'); L.textContent += (m+"\\n"); L.scrollTop=L.scrollHeight; }
+    function impProg(v){ var el=byId('impProg'); el.style.display='block'; el.value=v; }
 
-  <script type="module">
-    const BUILD_VERSION = 'v7.8';
+    // ===== State =====
+    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
+    for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
+    byId('impWeek').value="1"; byId('weekSelect').value="1";
 
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { 
-      getAuth, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence 
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-    import { 
-      initializeFirestore, getFirestore, collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, setDoc, getDoc, limit, serverTimestamp, writeBatch 
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
+    // ===== Firebase init (compat) =====
     const cfg = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
       authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -212,232 +185,92 @@
       appId: "1:802058909501:web:bb935c188891934de07754",
       measurementId: "G-MSJHYZ4VG2"
     };
-    const app = initializeApp(cfg);
-    initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    setPersistence(auth, browserLocalPersistence).catch(()=>{});
+    firebase.initializeApp(cfg);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
 
     const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
-    const fmt2 = n => String(n).padStart(2,'0');
-    const weekId = (season, w) => `${season}-Week-${fmt2(w)}`;
-    const $ = sel => document.querySelector(sel);
-    const byId = id => document.getElementById(id);
-    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    function toLocal(iso){
-      if(!iso) return "";
-      const d = new Date(iso);
-      const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const da=String(d.getDate()).padStart(2,'0');
-      const h=String(d.getHours()).padStart(2,'0'); const mi=String(d.getMinutes()).padStart(2,'0');
-      return `${y}-${m}-${da}T${h}:${mi}`;
-    }
-    function setStatus(m){ byId('status').textContent = m || ""; }
 
-    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
-
-    // Populate importer week select
-    for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
-    // pick up the toolbar week as default
-    byId('impWeek').value=byId('weekSelect').value;
-    byId('weekSelect').value="1";
-
-    onAuthStateChanged(auth, async (user)=>{
+    // ===== Auth gate =====
+    auth.onAuthStateChanged(async function(user){
       if(!user){ location.replace('./index.html'); return; }
-      if(!ADMIN_UIDS.includes(user.uid)){ alert("Admins only."); await signOut(auth); location.replace('./index.html'); return; }
+      if(ADMIN_UIDS.indexOf(user.uid)===-1){ alert("Admins only."); await auth.signOut(); location.replace('./index.html'); return; }
       byId('userTag').textContent = user.email || "";
-      await loadWeek();
+      loadWeek();
     });
 
-    // Header Back link (robust for GitHub Pages subfolder)
-    (function(){
-      const a=document.getElementById('backLink'); if(!a) return;
-      a.addEventListener('click', (e)=>{
-        e.preventDefault();
-        const base = location.pathname.replace(/\\/[^\\/]*$/, '/');
-        location.assign(location.origin + base);
-      });
-    })();
-
-    // Toolbar events
-    byId('seasonInput').addEventListener('change', ()=>{ state.season=Number(byId('seasonInput').value||2025); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
-    byId('weekSelect').addEventListener('change', ()=>{ state.weekNum=Number(byId('weekSelect').value||1); state.weekId=weekId(state.season,state.weekNum); byId('impWeek').value=String(state.weekNum); loadWeek(); });
+    // ===== UI wiring =====
+    byId('seasonInput').addEventListener('change', function(){ state.season=Number(byId('seasonInput').value||2025); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
+    byId('weekSelect').addEventListener('change', function(){ state.weekNum=Number(byId('weekSelect').value||1); state.weekId=weekId(state.season,state.weekNum); byId('impWeek').value=String(state.weekNum); loadWeek(); });
     byId('refreshBtn').addEventListener('click', loadWeek);
     byId('addGameBtn').addEventListener('click', addGame);
     byId('saveChangesBtn').addEventListener('click', saveChanges);
-
-    
-// === Open Import Modal utilities ===
-function openImporterModal(){
-  const modal = byId('importModal');
-  if(!modal) { console.warn('Modal not found'); return; }
-  modal.classList.add('open');
-  setTimeout(()=>{ const f = byId('impFile'); if(f) f.focus(); }, 0);
-}
-// Detect if something overlays the button
-function diagnoseOverlay(btn){
-  try{
-    const r = btn.getBoundingClientRect();
-    const cx = Math.floor(r.left + r.width/2);
-    const cy = Math.floor(r.top + r.height/2);
-    const topEl = document.elementFromPoint(cx, cy);
-    console.log('Overlay check @', cx, cy, '=>', topEl);
-    if(topEl && topEl !== btn){
-      topEl.style.outline = '2px dashed #ef4444';
-      topEl.style.outlineOffset = '2px';
-      const warn = document.createElement('div');
-      warn.textContent = 'Heads up: An element was overlaying the Import button. We highlighted it in red dashes.';
-      warn.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);background:#ef4444;color:#fff;padding:8px 12px;border-radius:8px;z-index:100000';
-      document.body.appendChild(warn);
-      setTimeout(()=>{ if(warn.parentNode) warn.parentNode.removeChild(warn); }, 4000);
-    }
-  }catch(e){ console.warn('diagnoseOverlay error', e); }
-}
-
-(function(){
-  const btn = byId('openImportBtn');
-  const fallback = byId('openImportFallback');
-  const modal = byId('importModal');
-
-  if(btn){
-    btn.addEventListener('click', (e)=>{
-      console.log('openImportBtn clicked');
-      openImporterModal();
-    });
-    // Run an overlay diagnostic after load
-    setTimeout(()=> diagnoseOverlay(btn), 250);
-  } else {
-    console.warn('openImportBtn not found');
-  }
-
-  if(fallback){
-    fallback.addEventListener('click', (e)=>{
-      e.preventDefault();
-      console.log('fallback link used');
-      openImporterModal();
-    });
-  }
-
-  // Global keyboard shortcuts as escape hatches
-  // Alt+I opens the modal
-  document.addEventListener('keydown', (e)=>{
-    if(e.altKey && (e.key==='i' || e.key==='I')){
-      console.log('Alt+I pressed — opening importer');
-      openImporterModal();
-    }
-  });
-
-  // Double-click anywhere on the header opens the modal
-  const header = document.querySelector('header');
-  if(header){
-    header.addEventListener('dblclick', ()=>{
-      console.log('Header double-click — opening importer');
-      openImporterModal();
-    });
-  }
-})();
-
-    // Importer events
-    (function(){
-      const btn = byId('openImportBtn');
-      const modal = byId('importModal');
-      if(btn && modal){
-        btn.addEventListener('click', ()=>{ 
-          console.log('openImportBtn clicked');
-          modal.classList.add('open'); 
-          // focus first actionable control in the modal
-          setTimeout(()=>{ const f = byId('impFile'); if(f) f.focus(); }, 0);
-        });
-      } else {
-        console.warn('Import button or modal not found at boot.');
-      }
-    })();
-    byId('closeImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.remove('open'); });
-    byId('impPreviewBtn').addEventListener('click', async ()=>{ const f = byId('impFile').files[0]; state.parsed = await parseCsvFile(f); if(state.parsed) renderPreview(state.parsed); });
-    const impBtn = byId('impRunBtn'); 
-    impBtn.disabled=false; 
-    impBtn.addEventListener('click', async ()=>{ 
-      console.log('impRunBtn clicked');
-      try{
-        // If no parsed data yet, try to parse from file input right now.
-        if(!state.parsed){
-          const f = byId('impFile').files[0];
-          if(!f){ alert('Pick or drop a CSV first.'); return; }
-          state.parsed = await parseCsvFile(f);
-          if(state.parsed){ renderPreview(state.parsed); }
-          else { return; }
-        }
-        await runImport();
-      }catch(err){
-        console.error('Import click error', err);
-        alert('Import error: ' + (err?.message || String(err)));
-      }
-    });
+    byId('openImportBtn').addEventListener('click', function(){ byId('importModal').classList.add('open'); setTimeout(function(){ byId('impFile').focus(); }, 0); });
+    byId('closeImportBtn').addEventListener('click', function(){ byId('importModal').classList.remove('open'); });
     byId('genTplBtn').addEventListener('click', generateTemplate);
+    byId('impPreviewBtn').addEventListener('click', previewCsv);
+    byId('impRunBtn').addEventListener('click', runImport);
 
     // Drag & drop
-    const drop = byId('drop');
-    ['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); drop.classList.add('drag'); }));
-    ;['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); drop.classList.remove('drag'); }));
-    drop.addEventListener('drop', async (e)=>{
-      const f = e.dataTransfer?.files?.[0];
-      if(!f){ return; }
-      state.parsed = await parseCsvFile(f);
-      if(state.parsed){ renderPreview(state.parsed); }
-    });
-
-    async function loadWeek(){
-      setStatus("Loading…");
-      byId('wid').textContent = state.weekId;
-      const q = query(collection(db, "games"), where("weekId", "==", state.weekId));
-      const snap = await getDocs(q);
-      state.games = [];
-      snap.forEach(d=>{
-        const g = d.data();
-        state.games.push({ id: d.id, day: g.day||"", kickoff: g.kickoff||"", home: g.home||"", away: g.away||"", winner: g.winner||"" });
+    (function(){
+      var drop = byId('drop');
+      ['dragenter','dragover'].forEach(function(evt){ drop.addEventListener(evt, function(e){ e.preventDefault(); drop.classList.add('drag'); }); });
+      ['dragleave','drop'].forEach(function(evt){ drop.addEventListener(evt, function(e){ e.preventDefault(); drop.classList.remove('drag'); }); });
+      drop.addEventListener('drop', function(e){
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if(!f) return;
+        parseCsvFile(f).then(function(p){ state.parsed = p; if(p) renderPreview(p); });
       });
-      state.games.sort((a,b)=> new Date(a.kickoff) - new Date(b.kickoff));
-      renderGrid();
-      byId('docCount').textContent = String(state.games.length);
-      const list = state.games.slice(0,10).map(x=>`• ${x.home} vs ${x.away} (${x.day})`).join('<br>');
-      byId('debugList').innerHTML = list || '<em>No games</em>';
-      setStatus(`Week ${state.weekNum} • ${state.games.length} game(s)`);
+    })();
+
+    // ===== Data =====
+    async function loadWeek(){
+      try{
+        setStatus("Loading…"); byId('wid').textContent = state.weekId;
+        const snap = await db.collection('games').where('weekId','==', state.weekId).get();
+        state.games = [];
+        snap.forEach(function(d){
+          var g = d.data();
+          state.games.push({ id:d.id, day:g.day||"", kickoff:g.kickoff||"", home:g.home||"", away:g.away||"", winner:g.winner||"" });
+        });
+        state.games.sort(function(a,b){ return new Date(a.kickoff)-new Date(b.kickoff); });
+        renderGrid();
+        byId('docCount').textContent = String(state.games.length);
+        const list = state.games.slice(0,10).map(function(x){ return "• " + x.home + " vs " + x.away + " (" + x.day + ")"; }).join('<br>');
+        byId('debugList').innerHTML = list || '<em>No games</em>';
+        setStatus("Week " + state.weekNum + " • " + state.games.length + " game(s)");
+      }catch(err){ console.error(err); setStatus("Load error: " + (err.message||err)); }
     }
 
     function renderGrid(){
-      const rows = byId('rows'); rows.innerHTML = "";
-      for(const g of state.games){
-        rows.appendChild(row(g));
-      }
+      var rows = byId('rows'); rows.innerHTML = "";
+      state.games.forEach(function(g){ rows.appendChild(row(g)); });
     }
-
     function row(game){
-      const node = document.createElement('div');
+      var node = document.createElement('div');
       node.className = 'trow';
       node.setAttribute('data-id', game.id);
-      node.innerHTML = `
-        <input data-field="day" value="${(game.day)}" placeholder="Thursday">
-        <input data-field="kickoff" type="datetime-local" value="${toLocal(game.kickoff)}">
-        <input data-field="home" value="${(game.home)}" placeholder="Home team">
-        <input data-field="away" value="${(game.away)}" placeholder="Away team">
-        <select data-field="winner">
-          <option value=""></option>
-          <option value="home" ${game.winner==="home"?"selected":""}>home</option>
-          <option value="away" ${game.winner==="away"?"selected":""}>away</option>
-        </select>
-        <div class="right">
-          <button class="btn-danger" data-action="delete" type="button" tabindex="0" type="button">Delete</button>
-        </div>`;
-      node.querySelector('[data-action="delete" type="button" tabindex="0"]').addEventListener('click', async ()=>{
+      node.innerHTML = ''
+        + '<input data-field="day" value="'+(game.day)+'" placeholder="Thursday">'
+        + '<input data-field="kickoff" type="datetime-local" value="'+toLocal(game.kickoff)+'">'
+        + '<input data-field="home" value="'+(game.home)+'" placeholder="Home team">'
+        + '<input data-field="away" value="'+(game.away)+'" placeholder="Away team">'
+        + '<select data-field="winner">'
+        +   '<option value=""></option>'
+        +   '<option value="home" '+(game.winner==="home"?"selected":"")+'>home</option>'
+        +   '<option value="away" '+(game.winner==="away"?"selected":"")+'>away</option>'
+        + '</select>'
+        + '<div class="right"><button class="btn-danger" type="button" data-action="delete">Delete</button></div>';
+      node.querySelector('[data-action="delete"]').addEventListener('click', async function(){
         if(!confirm("Delete this game?")) return;
-        await deleteDoc(doc(db, "games", game.id));
+        await db.collection('games').doc(game.id).delete();
         await loadWeek();
       });
       return node;
     }
 
     async function saveChanges(){
-      const rows = [...document.querySelectorAll('.trow')];
+      var rows = Array.prototype.slice.call(document.querySelectorAll('.trow'));
       let count = 0;
       for(const r of rows){
         const id = r.getAttribute('data-id');
@@ -448,10 +281,10 @@ function diagnoseOverlay(btn){
           away: r.querySelector('[data-field="away"]').value.trim(),
           winner: r.querySelector('[data-field="winner"]').value || ""
         };
-        await updateDoc(doc(db,"games", id), payload);
+        await db.collection('games').doc(id).update(payload);
         count++;
       }
-      setStatus(`Saved ${count} game(s).`);
+      setStatus("Saved " + count + " game(s).");
     }
 
     async function addGame(){
@@ -461,170 +294,157 @@ function diagnoseOverlay(btn){
       const kick = byId('kickoffInput').value;
       if(!home || !away || !kick){ alert("Fill Home, Away, Kickoff."); return; }
       const payload = { weekId: state.weekId, day, home, away, kickoff: new Date(kick).toISOString(), winner: "" };
-      await addDoc(collection(db,"games"), payload);
+      await db.collection('games').add(payload);
       byId('homeInput').value=""; byId('awayInput').value=""; byId('kickoffInput').value="";
       await loadWeek();
     }
 
-    /* ===== Importer logic (games only) ===== */
-    function impSetStatus(m){ byId('impStatus').textContent = m||""; }
-    function impLog(m){ const L=byId('log'); L.textContent += (m + "\\n"); L.scrollTop=L.scrollHeight; }
-    function impProg(p){ const el=byId('impProg'); el.style.display='block'; el.value=p; }
-
-    function renderPreview(p){
-      byId('previewInfo').textContent = `Games: ${p.games.length}`;
-      const tbl = byId('previewTable');
-      tbl.innerHTML = "";
-      const trh = document.createElement("tr");
-      ["day","kickoff_local","home","away","winner"].forEach(h=>{
-        const th=document.createElement("th"); th.textContent=h; trh.appendChild(th);
-      });
-      tbl.appendChild(trh);
-      for(const r of p.rows){
-        const tr=document.createElement("tr");
-        r.std.forEach(v=>{ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); });
-        tbl.appendChild(tr);
-      }
-      byId('previewCard').style.display = "block";
-    }
-
-    async function runImport(){
-      if(!state.parsed){ alert("Preview the CSV first."); return; }
-      const season = Number(byId('impSeason').value||2025);
-      const wn = Number(byId('impWeek').value||1);
-      const wid = weekId(season, wn);
-      const replace = byId('impReplace').checked;
-      const dry = byId('impDry').checked;
-
-      impSetStatus("Importing…"); impLog(`Import start for ${wid}`); impProg(1);
-
-      try{
-        // Delete existing games for the week if replace checked
-        if(replace){
-          impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
-          const qs = query(collection(db,"games"), where("weekId","==", wid));
-          const snap = await getDocs(qs);
-          if(!dry){
-            const bDel = writeBatch(db);
-            snap.forEach(d=> bDel.delete(doc(db,"games", d.id)));
-            await bDel.commit();
-          }
-          impLog(`Deleted ${snap.size} game(s)`);
-        }
-        impProg(10);
-
-        // Create games (batch)
-        if(!dry){
-          const bGames = writeBatch(db);
-          for(const g of state.parsed.games){
-            const ref = doc(collection(db,"games"));
-            bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso });
-          }
-          await bGames.commit();
-        }
-        impLog(`Wrote ${state.parsed.games.length} game(s)`);
-        impProg(100);
-
-        impSetStatus("✅ Import complete.");
-        alert(`Import complete!\\n\\nGames added: ${state.parsed.games.length}${dry?'\\n\\n(DRY-RUN: no writes performed)':''}`);
-
-        if(wid === state.weekId) await loadWeek();
-      }catch(err){
-        console.error(err);
-        impSetStatus("❌ Import failed. See details below.");
-        impLog(err?.message || String(err));
-        alert("Import failed: " + (err?.message || String(err)));
-      }
-    }
-
+    // ===== CSV/Import =====
     function parseAmPm(s){
-      // Accepts M/D/YYYY H:MM AM/PM
-      const re = /^\\s*(\\d{1,2})[\\/](\\d{1,2})[\\/-](\\d{2,4})\\s+(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])\\s*$/;
-      const m = s.match(re);
-      if(!m) return null;
-      let [_, M, D, Y, h, min, ap] = m;
-      M=+M; D=+D; Y=+Y; h=+h; min=+min;
+      if(!s) return null;
+      const t = String(s).trim();
+      const parts = t.split(' ');
+      if(parts.length < 2) return null;
+      const datePart = parts[0].replace('-', '/');
+      const timePart = parts[1];
+      const ampm = (parts[2]||'').toLowerCase();
+      const dBits = datePart.split('/');
+      if(dBits.length !== 3) return null;
+      let M = parseInt(dBits[0],10), D = parseInt(dBits[1],10), Y = parseInt(dBits[2],10);
+      const tm = timePart.split(':');
+      if(tm.length < 2) return null;
+      let h = parseInt(tm[0],10), min = parseInt(tm[1],10);
+      if(!isFinite(M)||!isFinite(D)||!isFinite(Y)||!isFinite(h)||!isFinite(min)) return null;
       if(Y<100) Y += 2000;
-      if(ap.toLowerCase()==="pm" && h<12) h+=12;
-      if(ap.toLowerCase()==="am" && h===12) h=0;
-      const mm = String(M).padStart(2,'0');
-      const dd = String(D).padStart(2,'0');
-      const hh = String(h).padStart(2,'0');
-      const mmin = String(min).padStart(2,'0');
-      return `${Y}-${mm}-${dd}T${hh}:${mmin}:00`;
+      const ap = ampm;
+      const isPM = ap.indexOf('pm')>=0;
+      const isAM = ap.indexOf('am')>=0;
+      if(isPM && h<12) h+=12;
+      if(isAM && h===12) h=0;
+      const mm = String(M).padStart(2,'0'), dd = String(D).padStart(2,'0');
+      const hh = String(h).padStart(2,'0'), mmin = String(min).padStart(2,'0');
+      return Y+"-"+mm+"-"+dd+"T"+hh+":"+mmin+":00";
     }
-
     function toIso(localStr){
       if(!localStr) return "";
       const s = String(localStr).trim();
-      // Try native Date first with T
       const d1 = new Date(s.indexOf(' ')>=0 ? s.replace(' ','T') : s);
       if(!isNaN(d1.getTime())) return d1.toISOString();
-      // Try US AM/PM format
       const alt = parseAmPm(s);
       if(alt){
         const d2 = new Date(alt);
         if(!isNaN(d2.getTime())) return d2.toISOString();
       }
-      throw new Error('Invalid kickoff_local datetime: ' + localStr);
+      throw new Error("Invalid kickoff_local datetime: " + localStr);
     }
-
-    async function parseCsvFile(file){
-      if(!file){ alert("Pick a CSV file first or drop it into the box."); return null; }
-      const text = await file.text();
-      const lines = text.split(/\\r?\\n/).filter(l => l.trim().length>0);
-      if(lines.length<2){ alert("CSV has no data rows (after trimming). Make sure you saved as CSV UTF-8 and that there is at least one data row below the header."); return null; }
-      let CSV_DELIM = (lines[0].includes(';') && !lines[0].includes(',')) ? ';' : ',';
-      const headers = splitCsvLine(lines[0], CSV_DELIM).map(s=>s.trim().toLowerCase());
-      const expected = ["day","kickoff_local","home","away","winner"];
-      for(let i=0;i<expected.length;i++){
-        if((headers[i]||"")!==expected[i]){
-          alert("Expected first columns: day,kickoff_local,home,away,winner");
-          return null;
+    function splitCsvLine(line, delim){
+      var out=[], cur="", inQ=false, d=delim||',';
+      for(var i=0;i<line.length;i++){
+        var ch=line[i];
+        if(ch === '"'){
+          if(inQ && line[i+1] === '"'){ cur+='"'; i++; }
+          else { inQ = !inQ; }
+        } else if(ch === d && !inQ){
+          out.push(cur); cur="";
+        } else {
+          cur += ch;
         }
       }
-
-      const games = [];
-      const rows = [];
-
-      for(let li=1; li<lines.length; li++){
-        const cols = splitCsvLine(lines[li], CSV_DELIM);
+      out.push(cur);
+      return out.map(function(s){ return (s||'').trim(); });
+    }
+    async function parseCsvFile(file){
+      if(!file){ alert("Pick a CSV file first or drop it into the box."); return null; }
+      const raw = await file.text();
+      impLog('Read CSV: ' + (file.name||'unnamed') + ' (' + raw.length + ' bytes)');
+      let text = raw.split('\r\n').join('\n'); text = text.split('\r').join('\n');
+      const linesAll = text.split('\n');
+      const lines = linesAll.filter(function(l){ return (l||'').trim().length>0; });
+      impLog('CSV diagnostics: bytes=' + raw.length + ', lines(raw)=' + linesAll.length + ', lines(trimmed)=' + lines.length);
+      if(lines.length < 2){ alert("CSV has no data rows. Ensure header + at least one row."); return null; }
+      const delim = (lines[0].indexOf(';')>=0 && lines[0].indexOf(',')<0) ? ';' : ',';
+      const headers = splitCsvLine(lines[0], delim).map(function(s){ return s.toLowerCase(); });
+      const expected = ["day","kickoff_local","home","away","winner"];
+      for(var i=0;i<expected.length;i++){ if((headers[i]||"")!==expected[i]){ alert("Expected first columns: day,kickoff_local,home,away,winner"); return null; } }
+      const games=[], rows=[];
+      for(var li=1; li<lines.length; li++){
+        const cols = splitCsvLine(lines[li], delim);
         if(cols.length===0) continue;
-        const [day, kickoffLocal, home, away, winner] = cols;
+        const day = cols[0], kickoffLocal = cols[1], home = cols[2], away = cols[3], winner = cols[4]||"";
         if(!day && !home && !away) continue;
         const iso = toIso(kickoffLocal);
-        games.push({ day, home, away, winner: (winner||"").toLowerCase(), kickoffIso: iso });
+        games.push({ day:day, home:home, away:away, winner:winner.toLowerCase(), kickoffIso: iso });
         rows.push({ std:[day,kickoffLocal,home,away,winner] });
       }
-
-      return { headers, games, rows };
+      return { headers:headers, games:games, rows:rows };
     }
+    function renderPreview(p){
+      byId('previewInfo').textContent = "Games: " + p.games.length;
+      const tbl = byId('previewTable'); tbl.innerHTML="";
+      const trh = document.createElement("tr");
+      ["day","kickoff_local","home","away","winner"].forEach(function(h){ const th=document.createElement("th"); th.textContent=h; trh.appendChild(th); });
+      tbl.appendChild(trh);
+      p.rows.forEach(function(r){ const tr=document.createElement("tr"); r.std.forEach(function(v){ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); }); tbl.appendChild(tr); });
+      byId('previewCard').style.display="block";
+    }
+    async function previewCsv(){
+      const f = byId('impFile').files[0];
+      state.parsed = await parseCsvFile(f);
+      if(state.parsed) renderPreview(state.parsed);
+    }
+    async function runImport(){
+      try{
+        if(!state.parsed){
+          const f = byId('impFile').files[0];
+          state.parsed = await parseCsvFile(f);
+          if(!state.parsed) return;
+        }
+        const season = Number(byId('impSeason').value||2025);
+        const wn = Number(byId('impWeek').value||1);
+        const wid = weekId(season, wn);
+        const replace = byId('impReplace').checked;
+        const dry = byId('impDry').checked;
 
-    function splitCsvLine(line, delim){
-      const out=[]; let cur=""; let inQ=false; const d = delim || ',';
-      for(let i=0;i<line.length;i++){
-        const ch=line[i];
-        if(ch==='"'){ 
-          if(inQ && line[i+1]==='"'){ cur+='"'; i++; }
-          else inQ=!inQ;
-        } else if(ch===d && !inQ){ out.push(cur); cur=""; }
-        else cur+=ch;
+        impSetStatus("Importing…"); impLog("Import start for " + wid); impProg(1);
+
+        if(replace){
+          impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
+          const qs = await db.collection('games').where('weekId','==', wid).get();
+          if(!dry){
+            const bDel = db.batch();
+            qs.forEach(function(d){ bDel.delete(db.collection('games').doc(d.id)); });
+            await bDel.commit();
+          }
+          impLog("Deleted " + qs.size + " game(s)");
+        }
+        impProg(15);
+
+        if(!dry){
+          const bGames = db.batch();
+          state.parsed.games.forEach(function(g){
+            const ref = db.collection('games').doc();
+            bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso });
+          });
+          await bGames.commit();
+        }
+        impLog("Wrote " + state.parsed.games.length + " game(s)");
+        impProg(100);
+        impSetStatus("✅ Import complete.");
+        alert("Import complete!\\n\\nGames added: " + state.parsed.games.length + (dry ? "\\n\\n(DRY-RUN: no writes performed)" : ""));
+        if(wid === state.weekId) await loadWeek();
+      }catch(err){
+        console.error(err); impSetStatus("❌ Import failed. See details below."); impLog(err && err.message ? err.message : String(err)); alert("Import failed: " + (err && err.message ? err.message : String(err)));
       }
-      out.push(cur);
-      return out.map(s=> (s||'').trim());
     }
-
     function generateTemplate(){
-      const csv = "day,kickoff_local,home,away,winner\\n";
+      const csv = "day,kickoff_local,home,away,winner\n";
       const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = "week-template.csv";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
+      const a = document.createElement('a'); a.href=url; a.download="week-template.csv"; document.body.appendChild(a); a.click();
+      setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 0);
     }
+
+  })();
   </script>
 </body>
 </html>
