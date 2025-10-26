@@ -65,12 +65,18 @@
   #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10000; position:relative;}
 
   #openImportBtn{position:relative; z-index:2; pointer-events:auto;}
+
+  #openImportBtn{position:relative; z-index:10010; pointer-events:auto;}
+  header, .toolbar{position:relative; z-index:1000;}
+  .modal{pointer-events:auto;}
+  .modal .sheet{z-index:10050; position:relative;}
+  #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10060; position:relative;}
 </style>
 </head>
 <body>
   <header>
     <a href="#" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.5</span></strong>
+    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.6</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -169,7 +175,7 @@
   </div>
 
   <script type="module">
-    const BUILD_VERSION = 'v7.5';
+    const BUILD_VERSION = 'v7.6';
 
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { 
@@ -241,6 +247,77 @@
     byId('refreshBtn').addEventListener('click', loadWeek);
     byId('addGameBtn').addEventListener('click', addGame);
     byId('saveChangesBtn').addEventListener('click', saveChanges);
+
+    
+// === Open Import Modal utilities ===
+function openImporterModal(){
+  const modal = byId('importModal');
+  if(!modal) { console.warn('Modal not found'); return; }
+  modal.classList.add('open');
+  setTimeout(()=>{ const f = byId('impFile'); if(f) f.focus(); }, 0);
+}
+// Detect if something overlays the button
+function diagnoseOverlay(btn){
+  try{
+    const r = btn.getBoundingClientRect();
+    const cx = Math.floor(r.left + r.width/2);
+    const cy = Math.floor(r.top + r.height/2);
+    const topEl = document.elementFromPoint(cx, cy);
+    console.log('Overlay check @', cx, cy, '=>', topEl);
+    if(topEl && topEl !== btn){
+      topEl.style.outline = '2px dashed #ef4444';
+      topEl.style.outlineOffset = '2px';
+      const warn = document.createElement('div');
+      warn.textContent = 'Heads up: An element was overlaying the Import button. We highlighted it in red dashes.';
+      warn.style.cssText = 'position:fixed;left:50%;top:10px;transform:translateX(-50%);background:#ef4444;color:#fff;padding:8px 12px;border-radius:8px;z-index:100000';
+      document.body.appendChild(warn);
+      setTimeout(()=>{ if(warn.parentNode) warn.parentNode.removeChild(warn); }, 4000);
+    }
+  }catch(e){ console.warn('diagnoseOverlay error', e); }
+}
+
+(function(){
+  const btn = byId('openImportBtn');
+  const fallback = byId('openImportFallback');
+  const modal = byId('importModal');
+
+  if(btn){
+    btn.addEventListener('click', (e)=>{
+      console.log('openImportBtn clicked');
+      openImporterModal();
+    });
+    // Run an overlay diagnostic after load
+    setTimeout(()=> diagnoseOverlay(btn), 250);
+  } else {
+    console.warn('openImportBtn not found');
+  }
+
+  if(fallback){
+    fallback.addEventListener('click', (e)=>{
+      e.preventDefault();
+      console.log('fallback link used');
+      openImporterModal();
+    });
+  }
+
+  // Global keyboard shortcuts as escape hatches
+  // Alt+I opens the modal
+  document.addEventListener('keydown', (e)=>{
+    if(e.altKey && (e.key==='i' || e.key==='I')){
+      console.log('Alt+I pressed — opening importer');
+      openImporterModal();
+    }
+  });
+
+  // Double-click anywhere on the header opens the modal
+  const header = document.querySelector('header');
+  if(header){
+    header.addEventListener('dblclick', ()=>{
+      console.log('Header double-click — opening importer');
+      openImporterModal();
+    });
+  }
+})();
 
     // Importer events
     (function(){
