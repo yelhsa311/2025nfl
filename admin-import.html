@@ -218,7 +218,7 @@
       const a=document.getElementById('backLink'); if(!a) return;
       a.addEventListener('click', (e)=>{
         e.preventDefault();
-        const base = location.pathname.replace(/\\/[^\\/]*$/, '/');
+        const base = location.pathname.replace(/\/[^/]*$/, '/');
         location.assign(location.origin + base);
       });
     })();
