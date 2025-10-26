@@ -239,14 +239,15 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-    createUserWithEmailAndPassword, signOut
+    createUserWithEmailAndPassword, signOut,
+    setPersistence, browserLocalPersistence
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
   import {
     initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp,
     onSnapshot, collection, addDoc, query, orderBy, where, collectionGroup, deleteDoc
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-  // --- Firebase config (yours) ---
+  // --- Firebase config ---
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
     authDomain: "nfl-picks-b83c2.firebaseapp.com",
@@ -263,8 +264,41 @@
   const auth = getAuth(app);
   const db = getFirestore(app);
 
+  // Persist login across tabs/reloads
+  await setPersistence(auth, browserLocalPersistence);
+
   // --- Admin UID(s) ---
   window.ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // your admin account
+
+  // --- Helper: ensure /publicUsers/{uid} has emailLower for UID resolution ---
+  async function upsertPublicUser(user) {
+    const emailLower = (user.email || "").toLowerCase();
+    if (!emailLower) return; // skip anonymous / no-email identities
+    await setDoc(doc(db, "publicUsers", user.uid), { emailLower }, { merge: true });
+  }
+
+  // --- Optional: block anonymous sessions on admin-only pages ---
+  function handleAnonymousOnAdmin(user) {
+    // if this page is admin-only (e.g., window.IS_ADMIN_PAGE set in the HTML),
+    // kick out anonymous users to prevent “new UID each time” issues
+    if (window.IS_ADMIN_PAGE && user && user.isAnonymous) {
+      alert("Please sign in with your real account to use admin tools.");
+      signOut(auth).finally(() => {
+        location.href = "/index.html"; // change if your login page differs
+      });
+      return true; // handled
+    }
+    return false;
+  }
+
+  // --- Auth state ---
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) return;                 // not signed in yet
+    if (handleAnonymousOnAdmin(user)) return;  // block anon on admin pages
+    await upsertPublicUser(user);      // ensure publicUsers mapping exists
+    // (optional) expose auth/db for debugging
+    window._auth = auth; window._db = db;
+  });
 
   // --- Helpers ---
   const el = s => document.querySelector(s);
