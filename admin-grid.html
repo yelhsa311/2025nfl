@@ -22,6 +22,8 @@
   .muted{color:var(--muted)}
   .dirty{background:rgba(255,213,110,.12)}
   .ok{color:var(--good)}
+  .btn-danger{background:#5b2020;border:1px solid #802020;color:#ffcccc;padding:6px 10px;border-radius:8px}
+  .btn-danger:hover{background:#7a2a2a}
 </style>
 </head>
 <body>
@@ -93,6 +95,12 @@
       </div>
     </div>
 
+    <!-- CLEANUP TOOLBAR (moved OUT of <script>) -->
+    <div class="row" style="margin-top:10px; gap:10px;">
+      <button id="removeDupesBtn">Remove Duplicates</button>
+      <button id="clearGamesBtn">Clear All Games for Week</button>
+    </div>
+
     <div class="card" style="max-height:70vh;overflow:auto">
       <table id="grid">
         <thead id="thead"></thead>
@@ -122,53 +130,55 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
-  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"]; // your admin uid
-  const ADMIN_EMAILS = ["yelhsa311@gmail.com"]; // add your admin email(s) here
 
+  // --- Admin allowlist ---
+  const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
+  const ADMIN_EMAILS = ["yelhsa311@gmail.com"];
+
+  // --- Helpers ---
   const el = s => document.querySelector(s);
   const byId = id => document.getElementById(id);
   const log  = (...a)=>{ el("#log").textContent += a.join(" ") + "\n"; };
   const setStatus = t => { el("#status").textContent = t || ""; };
   const fmtTime = ts => ts ? new Date(ts).toLocaleString([], { month:"short", day:"2-digit", hour:"numeric", minute:"2-digit" }) : "";
-
   const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
   const uidFromEmail = email => slug(email).slice(0,64);
 
   const state = {
     weekId: null,
-    users: [],                 // emails (columns)
-    games: [],                 // [{id, day, home, away, kickoffTs, winner}]
-    picksByUser: new Map(),    // email -> { [gameId]: "home"|"away" }
+    users: [],
+    games: [],
+    picksByUser: new Map(),
     dirty: { games: new Set(), picks: new Set() }
   };
 
-  // Auth
+  // --- Auth flow (no empty click overrides, no illegal await) ---
   onAuthStateChanged(auth, (user)=>{
     if(!user){
       el("#auth").style.display="";
       el("#app").style.display="none";
       return;
     }
+
     const isAdmin =
       ADMIN_UIDS.includes(user.uid) ||
       ADMIN_EMAILS.includes((user.email || "").toLowerCase());
-    
+
     el("#userTag").textContent = `${user.email} • uid:${user.uid}`;
     el("#adminTag").style.display = isAdmin ? "" : "none";
-    
+
     if (!isAdmin) {
       alert(
         `Admins only.\n\nAdd this UID to ADMIN_UIDS or email to ADMIN_EMAILS:\n` +
         `UID: ${user.uid}\nEmail: ${user.email}`
       );
-      // Temporary: if you want to peek without privileges, comment out the next line
-      await signOut(auth);
+      // Keep them signed in if you prefer; or sign them out without await:
+      signOut(auth);
       return;
     }
-    
+
     el("#auth").style.display = "none";
     el("#app").style.display  = "";
-
 
     // week select
     const sel = byId("weekSelect"); sel.innerHTML="";
@@ -183,7 +193,6 @@
     sel.onchange = ()=>{ state.weekId = sel.value; localStorage.setItem("adminGridWeek", state.weekId); loadWeek(); };
 
     // actions
-    byId("signInBtn").onclick = async ()=>{};
     byId("refreshBtn").onclick = loadWeek;
     byId("applyUsersBtn").onclick = applyUsers;
     byId("saveBtn").onclick = saveAll;
@@ -194,13 +203,14 @@
     loadWeek();
   });
 
+  // Real sign-in handler (kept)
   byId("signInBtn").onclick = async ()=>{
     try{
       await signInWithEmailAndPassword(auth, byId("email").value.trim(), byId("pass").value);
     }catch(e){ alert(e.message); }
   };
 
-  // Users prefs
+  // --- Users prefs ---
   function saveUsersPref(){
     localStorage.setItem("adminGridUsers:"+state.weekId, JSON.stringify(state.users));
     localStorage.setItem("adminGridUsers:GLOBAL", JSON.stringify(Array.from(new Set(state.users))));
@@ -221,7 +231,7 @@
     renderGrid();
   }
 
-  // Add Game
+  // --- Add Game ---
   const toMs = (val) => {
     if (!val) return null; const ms = Date.parse(val); return Number.isFinite(ms) ? ms : null;
   };
@@ -249,13 +259,7 @@
     }
   }
 
-  <div class="row" style="margin-top:10px; gap:10px;">
-  <button id="removeDupesBtn">Remove Duplicates</button>
-  <button id="clearGamesBtn">Clear All Games for Week</button>
-  </div>
-
-  
-  // Load games + picks
+  // --- Load games + picks ---
   async function loadWeek(){
     try{
       setStatus("Loading…");
@@ -311,6 +315,7 @@
       "<th style='min-width:220px'>Home</th>",
       "<th style='min-width:220px'>Away</th>",
       "<th style='min-width:120px'>Winner</th>",
+      "<th style='min-width:90px'></th>" // delete column
     ];
     for (const email of state.users) cols.push(`<th style="min-width:140px">${email}</th>`);
     return `<tr>${cols.join("")}</tr>`;
@@ -374,20 +379,21 @@
       }
       tb.appendChild(tr);
     }
-  // Bind delete buttons AFTER rows are created
-  tb.querySelectorAll("button[data-del]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const gid = btn.dataset.del;
-      if (confirm("Delete this game?")) {
-        await deleteDoc(doc(db, "weeks", state.weekId, "games", gid));
-        setStatus(`Deleted ${gid}`);
-        await loadWeek(); // refresh grid to remove deleted row
-      }
+
+    // Bind delete buttons AFTER rows are created
+    tb.querySelectorAll("button[data-del]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const gid = btn.dataset.del;
+        if (confirm("Delete this game?")) {
+          await deleteDoc(doc(db, "weeks", state.weekId, "games", gid));
+          setStatus(`Deleted ${gid}`);
+          await loadWeek();
+        }
+      });
     });
-  });    
   }
 
-  // track winner changes
+  // Track winner changes
   el("#tbody").addEventListener("change", (e)=>{
     const t = e.target;
     if (!(t instanceof HTMLSelectElement)) return;
@@ -399,10 +405,10 @@
     }
   });
 
+  // Save all
   async function saveAll(){
     try{
       setStatus("Saving…");
-      // winners (batch)
       const batch = writeBatch(db);
       const gameIds = [...state.dirty.games];
       for (const gid of gameIds){
@@ -412,7 +418,6 @@
       }
       await batch.commit();
 
-      // picks (per user)
       let pickDocs=0;
       for (const email of state.dirty.picks){
         const uid = uidFromEmail(email);
@@ -432,38 +437,38 @@
       alert("Save error: " + (e.message||e));
     }
   }
+
   // --- ADMIN CLEANUP TOOLS ---
-  
   document.getElementById("removeDupesBtn").onclick = async () => {
     if (!confirm("Remove duplicate games for this week?")) return;
     const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
     const seen = new Map();
     const toDelete = [];
+    const norm = s => (s||"").toLowerCase().trim();
+
     gamesSnap.forEach(d => {
       const g = d.data();
-      const key = `${(g.day||"").toLowerCase()}|${(g.home||"").toLowerCase()}|${(g.away||"").toLowerCase()}|${g.kickoffTs||0}`;
+      const key = `${norm(g.day||"unknown")}|${norm(g.home)}|${norm(g.away)}|${Number.isFinite(g.kickoffTs)?g.kickoffTs:0}`;
       if (seen.has(key)) {
         toDelete.push(d.ref);
       } else {
         seen.set(key, d.ref);
       }
     });
+
     for (const ref of toDelete) await deleteDoc(ref);
     setStatus(`Removed ${toDelete.length} duplicate game(s).`);
     await loadWeek();
   };
-  
+
   document.getElementById("clearGamesBtn").onclick = async () => {
     if (!confirm(`Delete ALL games for ${state.weekId}?`)) return;
     const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
     let count = 0;
-    for (const docSnap of gamesSnap.docs) {
-      await deleteDoc(docSnap.ref);
-      count++;
-    }
+    for (const docSnap of gamesSnap.docs) { await deleteDoc(docSnap.ref); count++; }
     setStatus(`Deleted ${count} games for ${state.weekId}.`);
     await loadWeek();
-  };  
+  };
 </script>
 </body>
 </html>
