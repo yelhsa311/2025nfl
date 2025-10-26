@@ -381,8 +381,9 @@
       if(!file){ alert("Pick a CSV file first."); return null; }
       const text = await file.text();
       const lines = text.split(/\\r?\\n/).filter(l => l.trim().length>0);
-      if(lines.length<2){ alert("CSV has no data rows."); return null; }
-      const headers = splitCsvLine(lines[0]).map(s=>s.trim().toLowerCase());
+      if(lines.length<2){ alert("CSV has no data rows (after trimming). Make sure you saved as CSV UTF-8 and that there is at least one data row below the header."); return null; }
+      let CSV_DELIM = (lines[0].includes(';') && !lines[0].includes(',')) ? ';' : ',';
+const headers = splitCsvLine(lines[0], CSV_DELIM).map(s=>s.trim().toLowerCase());
       const expected = ["day","kickoff_local","home","away","winner"];
       for(let i=0;i<expected.length;i++){
         if((headers[i]||"")!==expected[i]){
@@ -395,7 +396,7 @@
       const rows = [];
 
       for(let li=1; li<lines.length; li++){
-        const cols = splitCsvLine(lines[li]);
+        const cols = splitCsvLine(lines[li], CSV_DELIM);
         if(cols.length===0) continue;
         const [day, kickoffLocal, home, away, winner] = cols;
         if(!day && !home && !away) continue;
@@ -415,14 +416,14 @@
       return d.toISOString();
     }
 
-    function splitCsvLine(line){
-      const out=[]; let cur=""; let inQ=false;
+    function splitCsvLine(line, delim){
+      const out=[]; let cur=""; let inQ=false; const d = delim || ',';
       for(let i=0;i<line.length;i++){
         const ch=line[i];
         if(ch=='"'){ 
           if(inQ && line[i+1]=='"'){ cur+='"'; i++; }
           else inQ=!inQ;
-        } else if(ch=="," && !inQ){ out.push(cur); cur=""; }
+        } else if(ch==d && !inQ){ out.push(cur); cur=""; }
         else cur+=ch;
       }
       out.push(cur);
