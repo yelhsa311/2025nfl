@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>NFL Picks — Admin Grid</title>
 <style>
-  :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2}
+  :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
   body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
   a{color:#aeb3ff;text-decoration:none}
@@ -22,8 +22,12 @@
   .muted{color:var(--muted)}
   .dirty{background:rgba(255,213,110,.12)}
   .ok{color:var(--good)}
+  .warn{color:var(--warn)}
+  .danger{color:var(--danger)}
   .btn-danger{background:#5b2020;border:1px solid #802020;color:#ffcccc;padding:6px 10px;border-radius:8px}
   .btn-danger:hover{background:#7a2a2a}
+  .chip{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border:1px solid var(--border);border-radius:999px}
+  .divider{height:1px;background:var(--border);margin:8px 0}
 </style>
 </head>
 <body>
@@ -95,10 +99,25 @@
       </div>
     </div>
 
-    <!-- Cleanup toolbar -->
+    <!-- Cleanup + Tools -->
     <div class="row" style="margin-top:10px; gap:10px;">
       <button id="removeDupesBtn">Remove Duplicates</button>
       <button id="clearGamesBtn">Clear All Games for Week</button>
+      <span class="divider" style="width:1px;"></span>
+      <span class="chip">Orphans: <span id="orphanCount" class="warn">—</span>
+        <button id="scanOrphansBtn" style="margin-left:8px">Scan</button>
+        <button id="fixOrphansBtn">Fix</button>
+      </span>
+      <span class="divider" style="width:1px;"></span>
+      <span class="chip">User Tools:
+        <select id="userSelect" style="margin-left:6px; min-width:220px"></select>
+        <button id="fillBlanksHomeBtn">Blanks → home</button>
+        <button id="fillBlanksAwayBtn">Blanks → away</button>
+        <button id="allHomeBtn">All → home</button>
+        <button id="allAwayBtn">All → away</button>
+        <button id="clearUserBtn" class="btn-danger">Clear</button>
+        <button id="saveUserBtn" class="primary">Save user</button>
+      </span>
     </div>
 
     <div class="card" style="max-height:70vh;overflow:auto">
@@ -153,7 +172,8 @@
     users: [],                 // emails (columns)
     games: [],                 // [{id, day, home, away, kickoffTs, winner}]
     picksByUser: new Map(),    // email -> { [gameId]: "home"|"away" }
-    dirty: { games: new Set(), picks: new Set() }
+    dirty: { games: new Set(), picks: new Set() },
+    orphans: new Map()         // email -> [gameId,...] where gameId not in games
   };
 
   // --- Auth flow ---
@@ -176,7 +196,7 @@
         `Admins only.\n\nAdd this UID to ADMIN_UIDS or email to ADMIN_EMAILS:\n` +
         `UID: ${user.uid}\nEmail: ${user.email}`
       );
-      signOut(auth); // Non-blocking; keeps UI predictable
+      signOut(auth); // Non-blocking
       return;
     }
 
@@ -201,6 +221,16 @@
     byId("saveBtn").onclick = saveAll;
     byId("addGameBtn").onclick = addGame;
 
+    byId("scanOrphansBtn").onclick = scanOrphans;
+    byId("fixOrphansBtn").onclick = fixOrphans;
+
+    byId("fillBlanksHomeBtn").onclick = ()=> fillUserPicks("home", true);
+    byId("fillBlanksAwayBtn").onclick = ()=> fillUserPicks("away", true);
+    byId("allHomeBtn").onclick        = ()=> fillUserPicks("home", false);
+    byId("allAwayBtn").onclick        = ()=> fillUserPicks("away", false);
+    byId("clearUserBtn").onclick      = clearUserPicks;
+    byId("saveUserBtn").onclick       = saveSelectedUser;
+
     // init
     loadUsersPref();
     loadWeek();
@@ -218,6 +248,7 @@
     localStorage.setItem("adminGridUsers:"+state.weekId, JSON.stringify(state.users));
     localStorage.setItem("adminGridUsers:GLOBAL", JSON.stringify(Array.from(new Set(state.users))));
     byId("usersInput").value = state.users.join(", ");
+    refreshUserSelect();
   }
   function loadUsersPref(){
     const raw = localStorage.getItem("adminGridUsers:"+state.weekId);
@@ -226,12 +257,22 @@
       catch { state.users = []; }
     }
     byId("usersInput").value = (state.users||[]).join(", ");
+    refreshUserSelect();
   }
   function applyUsers(){
     const emails = byId("usersInput").value.split(",").map(s=>s.trim()).filter(Boolean);
     state.users = emails;
     saveUsersPref();
     renderGrid();
+  }
+  function refreshUserSelect(){
+    const sel = byId("userSelect");
+    sel.innerHTML = "";
+    for (const email of state.users){
+      const opt = document.createElement("option");
+      opt.value = email; opt.textContent = email;
+      sel.appendChild(opt);
+    }
   }
 
   // Add Game
@@ -270,6 +311,8 @@
       el("#thead").innerHTML = ""; el("#tbody").innerHTML = "";
       state.games = []; state.picksByUser.clear();
       state.dirty.games.clear(); state.dirty.picks.clear();
+      state.orphans.clear();
+      byId("orphanCount").textContent = "—";
 
       // games: order by kickoffTs (or createdAt as fallback)
       const gq = query(collection(db,"weeks",state.weekId,"games"), orderBy("kickoffTs","asc"));
@@ -377,7 +420,21 @@
         const picks = state.picksByUser.get(email) || {};
         const val = picks[g.id] || "";
         const td = document.createElement("td");
-        td.appendChild(pickSelect(g, email, val));
+        td.dataset.user = email;
+        td.dataset.gameid = g.id;
+
+        // make the cell clickable to cycle "", "home", "away"
+        td.style.cursor = "pointer";
+        td.title = "Click to cycle pick: blank → home → away";
+
+        const sel = pickSelect(g, email, val);
+        td.appendChild(sel);
+        td.addEventListener("click", (evt) => {
+          // avoid double change if actual <select> was clicked
+          if (evt.target && evt.target.tagName === "SELECT") return;
+          cycleCell(td);
+        });
+
         tr.appendChild(td);
       }
       tb.appendChild(tr);
@@ -397,7 +454,24 @@
     });
   }
 
-  // Track winner changes
+  // Click-to-cycle helper
+  function cycleCell(td){
+    const email = td.dataset.user;
+    const gameId = td.dataset.gameid;
+    if (!email || !gameId) return;
+
+    const p = state.picksByUser.get(email) || {};
+    const curr = p[gameId] || "";
+    const next = curr === "" ? "home" : curr === "home" ? "away" : "";
+    p[gameId] = next;
+    state.picksByUser.set(email, p);
+    state.dirty.picks.add(email);
+
+    const sel = td.querySelector("select");
+    if (sel){ sel.value = next; sel.classList.add("dirty"); }
+  }
+
+  // Track winner changes (from select)
   el("#tbody").addEventListener("change", (e)=>{
     const t = e.target;
     if (!(t instanceof HTMLSelectElement)) return;
@@ -480,76 +554,115 @@
     setStatus(`Pruned ${totalUpdates} pick entr${totalUpdates===1?'y':'ies'} referencing deleted game(s).`);
   }
 
-  // --- ADMIN CLEANUP TOOLS ---
-  document.getElementById("removeDupesBtn").onclick = async () => {
-    if (!confirm("Remove duplicate games for this week?")) return;
+  // ---- ORPHAN CHECKER ----
+  async function scanOrphans(){
+    setStatus("Scanning for orphan picks…");
+    state.orphans.clear();
 
-    // Load all games
+    // Build set of valid gameIds for this week
     const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+    const valid = new Set(gamesSnap.docs.map(d => d.id));
 
-    // Build groups by signature and keep the best candidate:
-    // - Prefer a doc that has a winner set
-    // - Otherwise, keep the earliest createdAt
-    const norm = s => (s||"").trim().toLowerCase();
-    const groups = new Map(); // sig -> { keepRef, keepData, dups: [ref] }
-
-    gamesSnap.forEach(d => {
-      const g = d.data();
-      const sig = `${norm(g.day||"unknown")}|${norm(g.home)}|${norm(g.away)}|${Number.isFinite(g.kickoffTs)?g.kickoffTs:0}`;
-      if (!groups.has(sig)) {
-        groups.set(sig, { keepRef: d.ref, keepData: g, dups: [] });
-      } else {
-        const cur = groups.get(sig);
-        const a = cur.keepData, b = g;
-        const aHasWin = a?.winner === "home" || a?.winner === "away";
-        const bHasWin = b?.winner === "home" || b?.winner === "away";
-
-        let keepCurrent = true;
-        if (bHasWin && !aHasWin) keepCurrent = false;
-        else if (aHasWin && !bHasWin) keepCurrent = true;
-        else {
-          const ac = a?.createdAt ?? Number.MAX_SAFE_INTEGER;
-          const bc = b?.createdAt ?? Number.MAX_SAFE_INTEGER;
-          keepCurrent = ac <= bc;
-        }
-
-        if (keepCurrent) {
-          // New doc is duplicate
-          cur.dups.push(d.ref);
-        } else {
-          // Swap: keep new, old becomes duplicate
-          cur.dups.push(cur.keepRef);
-          cur.keepRef = d.ref;
-          cur.keepData = b;
-        }
-        groups.set(sig, cur);
-      }
-    });
-
-    // Collect IDs to prune from picks, delete duplicates
-    const toDelete = [];
-    groups.forEach(grp => grp.dups.forEach(ref => toDelete.push(ref)));
-
-    const ids = toDelete.map(ref => ref.id);
-    for (const ref of toDelete) await deleteDoc(ref);
-
-    await pruneGamesFromAllPicks(state.weekId, ids);
-    setStatus(`Removed ${toDelete.length} duplicate game(s).`);
-    await loadWeek();
-  };
-
-  document.getElementById("clearGamesBtn").onclick = async () => {
-    if (!confirm(`Delete ALL games for ${state.weekId}?`)) return;
-    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-    const ids = gamesSnap.docs.map(d => d.id);
+    // Walk all picks docs for this week
+    const q = query(collectionGroup(db, "weeks"));
+    const snap = await getDocs(q);
 
     let count = 0;
-    for (const docSnap of gamesSnap.docs) { await deleteDoc(docSnap.ref); count++; }
+    for (const d of snap.docs){
+      const data = d.data();
+      if (data.weekId !== state.weekId) continue;
+      const email = (data.email || "").trim() || d.ref.path.split("/")[1];
+      const picks = data.picks || {};
+      const badIds = Object.keys(picks).filter(gid => !valid.has(gid));
+      if (badIds.length){
+        state.orphans.set(email, badIds);
+        count += badIds.length;
+      }
+    }
+    byId("orphanCount").textContent = String(count || "0");
+    if (count === 0) setStatus("No orphan picks found.");
+    else setStatus(`Found ${count} orphan pick entr${count===1?'y':'ies'}. Click Fix to prune.`);
+  }
 
-    await pruneGamesFromAllPicks(state.weekId, ids);
-    setStatus(`Deleted ${count} games for ${state.weekId}.`);
+  async function fixOrphans(){
+    if (state.orphans.size === 0){
+      setStatus("Nothing to fix.");
+      return;
+    }
+    // Collect all orphan IDs (unique) and prune
+    const ids = new Set();
+    for (const arr of state.orphans.values()){ for (const id of arr) ids.add(id); }
+    await pruneGamesFromAllPicks(state.weekId, Array.from(ids));
+    state.orphans.clear();
+    byId("orphanCount").textContent = "0";
+    setStatus("Orphans pruned.");
     await loadWeek();
-  };
+  }
+
+  // ---- USER QUICK TOOLS ----
+  function getSelectedUserEmail(){
+    const sel = byId("userSelect");
+    const email = sel.value || "";
+    if (!email){ alert("Select a user first."); }
+    return email;
+  }
+
+  function fillUserPicks(side, blanksOnly){
+    const email = getSelectedUserEmail(); if (!email) return;
+    const p = state.picksByUser.get(email) || {};
+    for (const g of state.games){
+      if (blanksOnly && p[g.id]) continue;
+      p[g.id] = side;
+    }
+    state.picksByUser.set(email, p);
+    state.dirty.picks.add(email);
+    // Reflect in UI (update that user's selects)
+    elAllUserSelects(email).forEach(sel => { if (blanksOnly && sel.value) return; sel.value = side; sel.classList.add("dirty"); });
+    setStatus(`${blanksOnly ? "Blanks" : "All"} for ${email} set to ${side}.`);
+  }
+
+  function clearUserPicks(){
+    const email = getSelectedUserEmail(); if (!email) return;
+    const p = state.picksByUser.get(email) || {};
+    for (const g of state.games){ p[g.id] = ""; }
+    state.picksByUser.set(email, p);
+    state.dirty.picks.add(email);
+    elAllUserSelects(email).forEach(sel => { sel.value = ""; sel.classList.add("dirty"); });
+    setStatus(`Cleared all picks for ${email}.`);
+  }
+
+  function elAllUserSelects(email){
+    // All <select data-kind="pick" data-email="...">
+    return Array.from(document.querySelectorAll(`select[data-kind="pick"][data-email="${cssEscape(email)}"]`));
+  }
+
+  function cssEscape(s){ return s.replace(/["\\]/g, "\\$&"); }
+
+  async function saveSelectedUser(){
+    const email = getSelectedUserEmail(); if (!email) return;
+    try{
+      const uid = uidFromEmail(email);
+      const picks = state.picksByUser.get(email) || {};
+      await setDoc(doc(db,"picks",uid,"weeks",state.weekId),
+        { email, weekId: state.weekId, picks, updatedAt: Date.now() }, { merge:true });
+      // Clean dirty marks for this user’s column
+      document.querySelectorAll(`select[data-kind="pick"][data-email="${cssEscape(email)}"]`)
+        .forEach(n=>n.classList.remove("dirty"));
+      state.dirty.picks.delete(email);
+      setStatus(`Saved picks for ${email}.`);
+    }catch(e){
+      alert("Save user error: " + (e.message||e));
+    }
+  }
+
+  // Enhance pickSelect to carry data-email for quick tools
+  // (Monkey-patch after definition; safe because function is hoisted)
+  const _orig_pickSelect = pickSelect;
+  pickSelect = function(g, email, current){
+    const s = _orig_pickSelect(g, email, current);
+    s.setAttribute("data-email", email);
+    return s;
+  }
 </script>
 </body>
 </html>
