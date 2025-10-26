@@ -71,15 +71,16 @@
 
   <!-- Firebase CDN (v10+ works; v9 also OK). Using v10 here. -->
   <script type="module">
-    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import {
       getAuth, setPersistence, browserLocalPersistence,
       GoogleAuthProvider, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect,
       onAuthStateChanged, signOut
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
     import {
       getFirestore, collection, getDocs, query, orderBy, where
-    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
 
     // =====  firebase.js  (inline)  =====
     const firebaseConfig = {
