@@ -76,7 +76,7 @@
 <body>
   <header>
     <a href="#" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.6</span></strong>
+    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.7</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -175,7 +175,7 @@
   </div>
 
   <script type="module">
-    const BUILD_VERSION = 'v7.6';
+    const BUILD_VERSION = 'v7.7';
 
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { 
@@ -538,17 +538,17 @@ function diagnoseOverlay(btn){
 
     function toIso(localStr){
       if(!localStr) return "";
-      const s = localStr.trim().replace(" ","T");
-      // Try native first
-      const d1 = new Date(s);
+      const s = String(localStr).trim();
+      // Try native Date first with T
+      const d1 = new Date(s.indexOf(' ')>=0 ? s.replace(' ','T') : s);
       if(!isNaN(d1.getTime())) return d1.toISOString();
-      // Try AM/PM US format
-      const alt = parseAmPm(localStr);
+      // Try US AM/PM format
+      const alt = parseAmPm(s);
       if(alt){
         const d2 = new Date(alt);
         if(!isNaN(d2.getTime())) return d2.toISOString();
       }
-      throw new Error("Invalid kickoff_local datetime: " + localStr);
+      throw new Error('Invalid kickoff_local datetime: ' + localStr);
     }
 
     async function parseCsvFile(file){
@@ -586,14 +586,14 @@ function diagnoseOverlay(btn){
       const out=[]; let cur=""; let inQ=false; const d = delim || ',';
       for(let i=0;i<line.length;i++){
         const ch=line[i];
-        if(ch=='"'){ 
-          if(inQ && line[i+1]=='"'){ cur+='"'; i++; }
+        if(ch==='"'){ 
+          if(inQ && line[i+1]==='"'){ cur+='"'; i++; }
           else inQ=!inQ;
-        } else if(ch==d && !inQ){ out.push(cur); cur=""; }
+        } else if(ch===d && !inQ){ out.push(cur); cur=""; }
         else cur+=ch;
       }
       out.push(cur);
-      return out.map(s=>s.trim());
+      return out.map(s=> (s||'').trim());
     }
 
     function generateTemplate(){
