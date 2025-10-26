@@ -56,7 +56,7 @@
 </head>
 <body>
   <header>
-    <a href="/index.html">← Back to App</a>
+    <a href="./index.html">← Back to App</a>
     <strong>Admin Grid — Importer</strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
@@ -193,7 +193,7 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    await setPersistence(auth, browserLocalPersistence);
+    setPersistence(auth, browserLocalPersistence).catch((e)=>console.warn('persistence set failed', e));
 
     const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
     const fmt2 = n => String(n).padStart(2,'0');
@@ -214,8 +214,8 @@
     byId('impWeek').value="8";
 
     onAuthStateChanged(auth, async (user)=>{
-      if(!user){ location.replace('/index.html'); return; }
-      if(!ADMIN_UIDS.includes(user.uid)){ alert("Admins only."); await signOut(auth); location.replace('/index.html'); return; }
+      if(!user){ location.replace('./index.html'); return; }
+      if(!ADMIN_UIDS.includes(user.uid)){ alert("Admins only."); await signOut(auth); location.replace('./index.html'); return; }
       byId('userTag').textContent = user.email || "";
       await loadWeek();
     });
