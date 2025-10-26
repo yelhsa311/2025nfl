@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Grid — Importer (v5)</title>
+  <title>Admin Importer — Games Only (v6)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -29,7 +29,7 @@
     .divider{width:2px; height:26px; background:var(--border); margin:0 6px; border-radius:2px}
     .chip{display:inline-flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px; background:var(--panel); border:1px solid var(--border); border-radius:12px; margin-top:10px}
     .table{margin-top:14px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--panel)}
-    .thead, .trow{display:grid; grid-template-columns: 110px 200px 1fr 1fr 120px 150px 90px; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding:10px}
+    .thead, .trow{display:grid; grid-template-columns: 110px 220px 1fr 1fr 140px 90px; align-items:center; gap:8px; border-bottom:1px solid var(--border); padding:10px}
     .thead{background:var(--panel-2); color:var(--muted); font-weight:600}
     .trow:nth-child(2n){background:rgba(255,255,255,0.02)}
     .trow input, .trow select{width:100%}
@@ -39,7 +39,6 @@
     .card{margin-top:14px; border:1px solid var(--border); border-radius:12px; background:var(--panel); padding:12px}
     code{background:#0c111b; border:1px solid var(--border); padding:2px 6px; border-radius:8px}
     #debugList{font-size:13px; color:var(--muted); max-height:180px; overflow:auto}
-
     /* Modal */
     .modal{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index:50}
     .modal.open{display:flex}
@@ -56,8 +55,8 @@
 </head>
 <body>
   <header>
-    <a href="./index.html">← Back to App</a>
-    <strong>Admin Grid — Importer</strong>
+    <a href="#" id="backLink">← Back to App</a>
+    <strong>Admin Importer — Games Only</strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -91,32 +90,13 @@
         <label>Kickoff <input id="kickoffInput" type="datetime-local"></label>
         <button id="addGameBtn">+ Add game</button>
         <button id="saveChangesBtn" class="primary">Save Game Changes</button>
+        <button id="openImportBtn">📥 Import Week (CSV)</button>
       </div>
-      <span class="divider"></span>
-      <div class="group">
-        <label>User email
-          <input id="userEmail" style="min-width:260px" placeholder="email@example.com">
-        </label>
-        <button id="loadUserBtn">Load</button>
-        <button id="saveUserBtn" class="primary">Save Picks</button>
-        <button id="setUidBtn" title="Manually set UID mapping for this email">Set UID</button>
-        <button id="openImportBtn">📥 Import Week</button>
-      </div>
-    </div>
-
-    <div class="chip">
-      <strong>User Picks:</strong>
-      <button id="fillBlanksHomeBtn">Blanks → home</button>
-      <button id="fillBlanksAwayBtn">Blanks → away</button>
-      <button id="allHomeBtn">All → home</button>
-      <button id="allAwayBtn">All → away</button>
-      <button id="clearUserBtn" class="btn-danger">Clear</button>
-      <span class="note">Load a user first. If header says <span class="warn">UID not found</span>, click “Set UID”.</span>
     </div>
 
     <div class="table">
       <div class="thead">
-        <div>Day</div><div>Kickoff</div><div>Home</div><div>Away</div><div>Winner</div><div id="pickHeader">Pick (load user)</div><div class="right">Actions</div>
+        <div>Day</div><div>Kickoff</div><div>Home</div><div>Away</div><div>Winner</div><div class="right">Actions</div>
       </div>
       <div id="rows"></div>
     </div>
@@ -130,24 +110,23 @@
     </div>
   </div>
 
+  <!-- Importer Modal (Games only) -->
   <div id="importModal" class="modal" aria-hidden="true">
     <div class="sheet">
       <div style="display:flex; align-items:center; gap:10px">
-        <h3>Import Week & Picks</h3>
+        <h3>Import Week — Games Only</h3>
         <div class="sp"></div>
         <button id="closeImportBtn">Close</button>
       </div>
       <div class="card" style="margin-top:8px">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center">
           <label>Season <input id="impSeason" type="number" min="2000" max="2100" value="2025" style="width:120px"></label>
-          <label>Week #
-            <select id="impWeek"></select>
-          </label>
+          <label>Week # <select id="impWeek"></select></label>
           <label><input id="impReplace" type="checkbox"> Replace games for this week (delete existing first)</label>
           <label><input id="impDry" type="checkbox"> Dry-run (no writes)</label>
           <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
-          <div class="note">CSV: day, kickoff_local (YYYY-MM-DD HH:MM), home, away, winner, then 1 column per user email with 'home'/'away' values.</div>
-          <div><a href="/week-template.csv" download>Download template</a></div>
+          <div class="note">CSV columns: <code>day,kickoff_local,home,away,winner</code></div>
+          <div><a href="./week-template.csv" download>Download template</a></div>
           <div class="sp"></div>
           <div><button id="impPreviewBtn">Preview</button> <button id="impRunBtn" class="primary">Import</button></div>
         </div>
@@ -193,25 +172,29 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    setPersistence(auth, browserLocalPersistence).catch((e)=>console.warn('persistence set failed', e));
+    setPersistence(auth, browserLocalPersistence).catch(()=>{});
 
     const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
     const fmt2 = n => String(n).padStart(2,'0');
     const weekId = (season, w) => `${season}-Week-${fmt2(w)}`;
     const $ = sel => document.querySelector(sel);
     const byId = id => document.getElementById(id);
-    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&gt;','"':'&quot;'}[c]));
-    const uidFromEmail = email => (email||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,64);
+    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;'}[c]));
+    function toLocal(iso){
+      if(!iso) return "";
+      const d = new Date(iso);
+      const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const da=String(d.getDate()).padStart(2,'0');
+      const h=String(d.getHours()).padStart(2,'0'); const mi=String(d.getMinutes()).padStart(2,'0');
+      return `${y}-${m}-${da}T${h}:${mi}`;
+    }
+    function setStatus(m){ byId('status').textContent = m || ""; }
 
-    const state = { 
-      season: 2025, weekNum: 1, weekId: weekId(2025,1), games: [],
-      currentUser: "", currentUid: "", picksByUser: new Map(),
-      parsed: null
-    };
+    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
 
-    byId('weekSelect').value="1";
+    // Populate importer week select
     for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
     byId('impWeek').value="8";
+    byId('weekSelect').value="1";
 
     onAuthStateChanged(auth, async (user)=>{
       if(!user){ location.replace('./index.html'); return; }
@@ -220,46 +203,28 @@
       await loadWeek();
     });
 
+    // Header Back link (robust for GitHub Pages subfolder)
+    (function(){
+      const a=document.getElementById('backLink'); if(!a) return;
+      a.addEventListener('click', (e)=>{
+        e.preventDefault();
+        const base = location.pathname.replace(/\/[^\/]*$/, '/');
+        location.assign(location.origin + base);
+      });
+    })();
+
+    // Toolbar events
     byId('seasonInput').addEventListener('change', ()=>{ state.season=Number(byId('seasonInput').value||2025); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
     byId('weekSelect').addEventListener('change', ()=>{ state.weekNum=Number(byId('weekSelect').value||1); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
     byId('refreshBtn').addEventListener('click', loadWeek);
     byId('addGameBtn').addEventListener('click', addGame);
     byId('saveChangesBtn').addEventListener('click', saveChanges);
 
-    byId('loadUserBtn').addEventListener('click', onLoadUser);
-    byId('saveUserBtn').addEventListener('click', saveSelectedUser);
-    byId('fillBlanksHomeBtn').addEventListener('click', ()=> fillUserPicks("home", true));
-    byId('fillBlanksAwayBtn').addEventListener('click', ()=> fillUserPicks("away", true));
-    byId('allHomeBtn').addEventListener('click', ()=> fillUserPicks("home", false));
-    byId('allAwayBtn').addEventListener('click', ()=> fillUserPicks("away", false));
-    byId('clearUserBtn').addEventListener('click', clearUserPicks);
-
-    byId('openImportBtn').addEventListener('click', ()=> { $("#importModal").classList.add("open"); });
-    byId('closeImportBtn').addEventListener('click', ()=> { $("#importModal").classList.remove("open"); });
-    byId('impPreviewBtn').addEventListener('click', async ()=>{ state.parsed = await parseCsvFile(byId('impFile').files[0]); if(state.parsed){ renderPreview(state.parsed); } });
+    // Importer events
+    byId('openImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.add('open'); });
+    byId('closeImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.remove('open'); });
+    byId('impPreviewBtn').addEventListener('click', async ()=>{ state.parsed = await parseCsvFile(byId('impFile').files[0]); if(state.parsed) renderPreview(state.parsed); });
     byId('impRunBtn').addEventListener('click', runImport);
-
-    async function onLoadUser(){
-      const email = (byId('userEmail').value||"").trim().toLowerCase();
-      if (!email) { alert("Enter a user email first."); return; }
-      byId('pickHeader').textContent = `Pick (${email}) — resolving…`;
-      const uid = await resolveUidForEmail(email);
-      state.currentUser = email;
-      state.currentUid = uid || "";
-      byId('pickHeader').textContent = uid ? `Pick (${email})` : `Pick (${email}) — UID not found`;
-      await loadWeek();
-      setStatus(`Loaded user: ${email}${uid ? ` (uid:${uid})` : ""}`);
-    }
-
-    async function resolveUidForEmail(email){
-      const q1 = query(collection(db, "publicUsers"), where("emailLower", "==", email), limit(1));
-      const s1 = await getDocs(q1);
-      if (s1.size > 0) return s1.docs[0].id;
-      const q2 = query(collection(db, "publicUsers"), where("email", "==", email), limit(1));
-      const s2 = await getDocs(q2);
-      if (s2.size > 0) return s2.docs[0].id;
-      return null;
-    }
 
     async function loadWeek(){
       setStatus("Loading…");
@@ -272,28 +237,11 @@
         state.games.push({ id: d.id, day: g.day||"", kickoff: g.kickoff||"", home: g.home||"", away: g.away||"", winner: g.winner||"" });
       });
       state.games.sort((a,b)=> new Date(a.kickoff) - new Date(b.kickoff));
-
-      state.picksByUser.clear();
-      if(state.currentUser){
-        let picks = {};
-        if(state.currentUid){
-          const pRef = doc(db, "picks", state.currentUid, "weeks", state.weekId);
-          const psnap = await getDoc(pRef);
-          if(psnap.exists()) picks = psnap.data().picks || {};
-        } else {
-          const legacyId = uidFromEmail(state.currentUser);
-          const pRefLegacy = doc(db, "picks", legacyId, "weeks", state.weekId);
-          const psnapLegacy = await getDoc(pRefLegacy);
-          if(psnapLegacy.exists()) picks = psnapLegacy.data().picks || {};
-        }
-        state.picksByUser.set(state.currentUser, picks);
-      }
-
       renderGrid();
       byId('docCount').textContent = String(state.games.length);
       const list = state.games.slice(0,10).map(x=>`• ${x.home} vs ${x.away} (${x.day})`).join('<br>');
       byId('debugList').innerHTML = list || '<em>No games</em>';
-      setStatus(`Adds to ${state.weekId} • ${state.games.length} game(s)`);
+      setStatus(`Week ${state.weekNum} • ${state.games.length} game(s)`);
     }
 
     function renderGrid(){
@@ -304,26 +252,18 @@
     }
 
     function row(game){
-      const picks = state.currentUser ? (state.picksByUser.get(state.currentUser) || {}) : {};
-      const userPick = picks[game.id] || "";
-      const pickDisabled = state.currentUser ? "" : "disabled";
       const node = document.createElement('div');
       node.className = 'trow';
       node.setAttribute('data-id', game.id);
       node.innerHTML = `
-        <input data-field="day" value="${escapeHtml(game.day)}" placeholder="Thursday">
+        <input data-field="day" value="${(game.day)}" placeholder="Thursday">
         <input data-field="kickoff" type="datetime-local" value="${toLocal(game.kickoff)}">
-        <input data-field="home" value="${escapeHtml(game.home)}" placeholder="Home team">
-        <input data-field="away" value="${escapeHtml(game.away)}" placeholder="Away team">
+        <input data-field="home" value="${(game.home)}" placeholder="Home team">
+        <input data-field="away" value="${(game.away)}" placeholder="Away team">
         <select data-field="winner">
           <option value=""></option>
           <option value="home" ${game.winner==="home"?"selected":""}>home</option>
           <option value="away" ${game.winner==="away"?"selected":""}>away</option>
-        </select>
-        <select data-field="pick" ${pickDisabled}>
-          <option value=""></option>
-          <option value="home" ${userPick==="home"?"selected":""}>home</option>
-          <option value="away" ${userPick==="away"?"selected":""}>away</option>
         </select>
         <div class="right">
           <button class="btn-danger" data-action="delete">Delete</button>
@@ -333,22 +273,7 @@
         await deleteDoc(doc(db, "games", game.id));
         await loadWeek();
       });
-      const pickSel = node.querySelector('select[data-field="pick"]');
-      if(pickSel){
-        pickSel.addEventListener('change', ()=>{
-          ensurePickMap();
-          const pm = state.picksByUser.get(state.currentUser);
-          pm[game.id] = pickSel.value || "";
-        });
-      }
       return node;
-    }
-
-    function ensurePickMap(){
-      if(!state.currentUser) return;
-      if(!state.picksByUser.has(state.currentUser)){
-        state.picksByUser.set(state.currentUser, {});
-      }
     }
 
     async function saveChanges(){
@@ -381,80 +306,23 @@
       await loadWeek();
     }
 
-    function getSelectedUserEmail(){
-      if(!state.currentUser){
-        alert("Load a user first.");
-        return "";
-      }
-      return state.currentUser;
-    }
-
-    function fillUserPicks(val, blanksOnly){
-      const email = getSelectedUserEmail(); if(!email) return;
-      ensurePickMap();
-      const pm = state.picksByUser.get(email);
-      for(const g of state.games){
-        if(blanksOnly && pm[g.id]) continue;
-        pm[g.id] = val;
-      }
-      renderGrid();
-    }
-
-    function clearUserPicks(){
-      const email = getSelectedUserEmail(); if(!email) return;
-      ensurePickMap();
-      const pm = state.picksByUser.get(email);
-      for(const g of state.games){ pm[g.id] = ""; }
-      renderGrid();
-    }
-
-    async function saveSelectedUser(){
-      const email = getSelectedUserEmail(); if(!email) return;
-      ensurePickMap();
-      const picks = state.picksByUser.get(email) || {};
-
-      if (!state.currentUid){
-        if (!confirm("No UID found for this email.
-Save to legacy email-slug path (main app may not see it)?")) return;
-        const legacyId = uidFromEmail(email);
-        const pRefLegacy = doc(db, "picks", legacyId, "weeks", state.weekId);
-        await setDoc(pRefLegacy, { picks, savedAt: serverTimestamp() }, { merge: true });
-        setStatus(`Saved (legacy) picks for ${email}.`);
-        return;
-      }
-
-      const pRef = doc(db, "picks", state.currentUid, "weeks", state.weekId);
-      await setDoc(pRef, { picks, savedAt: serverTimestamp() }, { merge: true });
-      setStatus(`Saved picks for ${email}.`);
-    }
-
-    function toLocal(iso){
-      if(!iso) return "";
-      const d = new Date(iso);
-      const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,'0'); const da=String(d.getDate()).padStart(2,'0');
-      const h=String(d.getHours()).padStart(2,'0'); const mi=String(d.getMinutes()).padStart(2,'0');
-      return `${y}-${m}-${da}T${h}:${mi}`;
-    }
-
-    function setStatus(m){ byId('status').textContent = m || ""; }
-
-    /* ===== Importer logic ===== */
+    /* ===== Importer logic (games only) ===== */
     function impSetStatus(m){ byId('impStatus').textContent = m||""; }
-    function impLog(m){ const L=byId('log'); L.textContent += (m + "\n"); L.scrollTop=L.scrollHeight; }
+    function impLog(m){ const L=byId('log'); L.textContent += (m + "\\n"); L.scrollTop=L.scrollHeight; }
     function impProg(p){ const el=byId('impProg'); el.style.display='block'; el.value=p; }
 
     function renderPreview(p){
-      byId('previewInfo').textContent = `Games: ${p.games.length} • Users: ${p.users.length}`;
+      byId('previewInfo').textContent = `Games: ${p.games.length}`;
       const tbl = byId('previewTable');
       tbl.innerHTML = "";
       const trh = document.createElement("tr");
-      ["day","kickoff_local","home","away","winner", ...p.users].forEach(h=>{
+      ["day","kickoff_local","home","away","winner"].forEach(h=>{
         const th=document.createElement("th"); th.textContent=h; trh.appendChild(th);
       });
       tbl.appendChild(trh);
       for(const r of p.rows){
         const tr=document.createElement("tr");
-        [...r.std, ...r.userVals].forEach(v=>{ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); });
+        r.std.forEach(v=>{ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); });
         tbl.appendChild(tr);
       }
       byId('previewCard').style.display = "block";
@@ -471,13 +339,7 @@ Save to legacy email-slug path (main app may not see it)?")) return;
       impSetStatus("Importing…"); impLog(`Import start for ${wid}`); impProg(1);
 
       try{
-        const uidMap = {};
-        for(const email of state.parsed.users){
-          const uid = await resolveUidForEmail(email);
-          uidMap[email] = uid || "";
-        }
-        impLog(`Resolved ${Object.values(uidMap).filter(Boolean).length}/${state.parsed.users.length} user UIDs`);
-
+        // Delete existing games for the week if replace checked
         if(replace){
           impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
           const qs = query(collection(db,"games"), where("weekId","==", wid));
@@ -491,47 +353,20 @@ Save to legacy email-slug path (main app may not see it)?")) return;
         }
         impProg(10);
 
-        const gameIds = [];
+        // Create games (batch)
         if(!dry){
           const bGames = writeBatch(db);
           for(const g of state.parsed.games){
             const ref = doc(collection(db,"games"));
-            gameIds.push(ref.id);
             bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso });
           }
           await bGames.commit();
-        } else {
-          for(let i=0;i<state.parsed.games.length;i++) gameIds.push(`SIM_${i}`);
         }
         impLog(`Wrote ${state.parsed.games.length} game(s)`);
-        impProg(60);
-
-        let ucount = 0;
-        for(const email of state.parsed.users){
-          const picksArr = state.parsed.picksByUser[email] || [];
-          const pm = {};
-          for(let i=0;i<gameIds.length;i++){
-            const choice = (picksArr[i]||"").toLowerCase();
-            if(choice==="home" || choice==="away"){ pm[gameIds[i]] = choice; }
-          }
-          const uid = uidMap[email];
-          if(!dry){
-            if(uid){
-              const pRef = doc(db, "picks", uid, "weeks", wid);
-              await setDoc(pRef, { picks: pm, savedAt: serverTimestamp() }, { merge: true });
-            } else {
-              const legacyId = uidFromEmail(email);
-              const pRefLegacy = doc(db, "picks", legacyId, "weeks", wid);
-              await setDoc(pRefLegacy, { picks: pm, savedAt: serverTimestamp() }, { merge: true });
-            }
-          }
-          ucount++;
-          if(ucount % 5 === 0) impProg(60 + Math.min(35, Math.floor(35*(ucount/state.parsed.users.length))));
-        }
-        impLog(`Updated ${state.parsed.users.length} user(s)`);
         impProg(100);
+
         impSetStatus("✅ Import complete.");
-        alert(`Import complete!\n\nGames added: ${state.parsed.games.length}\nUsers updated: ${state.parsed.users.length}${dry?'\n\n(DRY-RUN: no writes performed)':''}`);
+        alert(`Import complete!\\n\\nGames added: ${state.parsed.games.length}${dry?'\\n\\n(DRY-RUN: no writes performed)':''}`);
 
         if(wid === state.weekId) await loadWeek();
       }catch(err){
@@ -545,38 +380,31 @@ Save to legacy email-slug path (main app may not see it)?")) return;
     async function parseCsvFile(file){
       if(!file){ alert("Pick a CSV file first."); return null; }
       const text = await file.text();
-      const lines = text.split(/\r?\n/).filter(l => l.trim().length>0);
+      const lines = text.split(/\\r?\\n/).filter(l => l.trim().length>0);
       if(lines.length<2){ alert("CSV has no data rows."); return null; }
-      const headers = splitCsvLine(lines[0]).map(s=>s.trim());
-      const std = ["day","kickoff_local","home","away","winner"];
-      for(let i=0;i<std.length;i++){
-        if((headers[i]||"").toLowerCase()!==std[i]){
+      const headers = splitCsvLine(lines[0]).map(s=>s.trim().toLowerCase());
+      const expected = ["day","kickoff_local","home","away","winner"];
+      for(let i=0;i<expected.length;i++){
+        if((headers[i]||"")!==expected[i]){
           alert("Expected first columns: day,kickoff_local,home,away,winner");
           return null;
         }
       }
-      const users = headers.slice(std.length).map(h=>h.trim().toLowerCase()).filter(Boolean);
-      if(users.length===0){ alert("No user columns found after 'winner'."); return null; }
 
       const games = [];
       const rows = [];
-      const picksByUser = Object.fromEntries(users.map(u=>[u,[]]));
 
       for(let li=1; li<lines.length; li++){
         const cols = splitCsvLine(lines[li]);
         if(cols.length===0) continue;
-        const [day, kickoffLocal, home, away, winner, ...userVals] = cols;
+        const [day, kickoffLocal, home, away, winner] = cols;
         if(!day && !home && !away) continue;
         const iso = toIso(kickoffLocal);
         games.push({ day, home, away, winner: (winner||"").toLowerCase(), kickoffIso: iso });
-        rows.push({ std:[day,kickoffLocal,home,away,winner], userVals });
-        users.forEach((u, idx)=>{
-          const v = (userVals[idx]||"").toLowerCase();
-          picksByUser[u].push(v);
-        });
+        rows.push({ std:[day,kickoffLocal,home,away,winner] });
       }
 
-      return { headers, users, games, picksByUser, rows };
+      return { headers, games, rows };
     }
 
     function toIso(localStr){
@@ -603,4 +431,3 @@ Save to legacy email-slug path (main app may not see it)?")) return;
   </script>
 </body>
 </html>
-
