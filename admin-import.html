@@ -59,12 +59,18 @@
   .modal{pointer-events:auto;}
   .modal .sheet{z-index:9999;}
   #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10000; position:relative;}
+
+  .modal{pointer-events:auto;}
+  .modal .sheet{z-index:9999; position:relative;}
+  #impRunBtn,#impPreviewBtn{pointer-events:auto; z-index:10000; position:relative;}
+
+  #openImportBtn{position:relative; z-index:2; pointer-events:auto;}
 </style>
 </head>
 <body>
   <header>
     <a href="#" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.4a</span></strong>
+    <strong>Admin Importer — Games Only <span id="buildTag" class="role" style="margin-left:8px">v7.5</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -163,7 +169,7 @@
   </div>
 
   <script type="module">
-    const BUILD_VERSION = 'v7.4a';
+    const BUILD_VERSION = 'v7.5';
 
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { 
@@ -237,10 +243,41 @@
     byId('saveChangesBtn').addEventListener('click', saveChanges);
 
     // Importer events
-    byId('openImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.add('open'); });
+    (function(){
+      const btn = byId('openImportBtn');
+      const modal = byId('importModal');
+      if(btn && modal){
+        btn.addEventListener('click', ()=>{ 
+          console.log('openImportBtn clicked');
+          modal.classList.add('open'); 
+          // focus first actionable control in the modal
+          setTimeout(()=>{ const f = byId('impFile'); if(f) f.focus(); }, 0);
+        });
+      } else {
+        console.warn('Import button or modal not found at boot.');
+      }
+    })();
     byId('closeImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.remove('open'); });
     byId('impPreviewBtn').addEventListener('click', async ()=>{ const f = byId('impFile').files[0]; state.parsed = await parseCsvFile(f); if(state.parsed) renderPreview(state.parsed); });
-    const impBtn = byId('impRunBtn'); impBtn.disabled=false; impBtn.addEventListener('click', ()=>{ console.log('impRunBtn clicked'); runImport(); });
+    const impBtn = byId('impRunBtn'); 
+    impBtn.disabled=false; 
+    impBtn.addEventListener('click', async ()=>{ 
+      console.log('impRunBtn clicked');
+      try{
+        // If no parsed data yet, try to parse from file input right now.
+        if(!state.parsed){
+          const f = byId('impFile').files[0];
+          if(!f){ alert('Pick or drop a CSV first.'); return; }
+          state.parsed = await parseCsvFile(f);
+          if(state.parsed){ renderPreview(state.parsed); }
+          else { return; }
+        }
+        await runImport();
+      }catch(err){
+        console.error('Import click error', err);
+        alert('Import error: ' + (err?.message || String(err)));
+      }
+    });
     byId('genTplBtn').addEventListener('click', generateTemplate);
 
     // Drag & drop
