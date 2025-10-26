@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v6)</title>
+  <title>Admin Importer — Games Only (v7)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -51,6 +51,8 @@
     th,td{border:1px solid var(--border); padding:6px 8px}
     th{background:var(--panel-2); color:var(--muted)}
     .warn{color:#f59e0b}
+    .drop{border:1px dashed var(--border); border-radius:12px; padding:12px; text-align:center; background:#0c111b55}
+    .drop.drag{outline:2px dashed var(--accent)}
   </style>
 </head>
 <body>
@@ -126,9 +128,14 @@
           <label><input id="impDry" type="checkbox"> Dry-run (no writes)</label>
           <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
           <div class="note">CSV columns: <code>day,kickoff_local,home,away,winner</code></div>
-          <div><a href="./week-template.csv" download>Download template</a></div>
+          <div>
+            <button id="genTplBtn">Generate template</button>
+          </div>
           <div class="sp"></div>
           <div><button id="impPreviewBtn">Preview</button> <button id="impRunBtn" class="primary">Import</button></div>
+        </div>
+        <div id="drop" class="drop" style="margin-top:10px">
+          Drag & drop your CSV here (or use the file picker above)
         </div>
       </div>
       <div id="previewCard" class="card" style="display:none">
@@ -179,7 +186,7 @@
     const weekId = (season, w) => `${season}-Week-${fmt2(w)}`;
     const $ = sel => document.querySelector(sel);
     const byId = id => document.getElementById(id);
-    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;'}[c]));
+    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     function toLocal(iso){
       if(!iso) return "";
       const d = new Date(iso);
@@ -193,7 +200,8 @@
 
     // Populate importer week select
     for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
-    byId('impWeek').value="8";
+    // pick up the toolbar week as default
+    byId('impWeek').value=byId('weekSelect').value;
     byId('weekSelect').value="1";
 
     onAuthStateChanged(auth, async (user)=>{
@@ -208,14 +216,14 @@
       const a=document.getElementById('backLink'); if(!a) return;
       a.addEventListener('click', (e)=>{
         e.preventDefault();
-        const base = location.pathname.replace(/\/[^\/]*$/, '/');
+        const base = location.pathname.replace(/\\/[^\\/]*$/, '/');
         location.assign(location.origin + base);
       });
     })();
 
     // Toolbar events
     byId('seasonInput').addEventListener('change', ()=>{ state.season=Number(byId('seasonInput').value||2025); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
-    byId('weekSelect').addEventListener('change', ()=>{ state.weekNum=Number(byId('weekSelect').value||1); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
+    byId('weekSelect').addEventListener('change', ()=>{ state.weekNum=Number(byId('weekSelect').value||1); state.weekId=weekId(state.season,state.weekNum); byId('impWeek').value=String(state.weekNum); loadWeek(); });
     byId('refreshBtn').addEventListener('click', loadWeek);
     byId('addGameBtn').addEventListener('click', addGame);
     byId('saveChangesBtn').addEventListener('click', saveChanges);
@@ -223,8 +231,20 @@
     // Importer events
     byId('openImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.add('open'); });
     byId('closeImportBtn').addEventListener('click', ()=>{ byId('importModal').classList.remove('open'); });
-    byId('impPreviewBtn').addEventListener('click', async ()=>{ state.parsed = await parseCsvFile(byId('impFile').files[0]); if(state.parsed) renderPreview(state.parsed); });
+    byId('impPreviewBtn').addEventListener('click', async ()=>{ const f = byId('impFile').files[0]; state.parsed = await parseCsvFile(f); if(state.parsed) renderPreview(state.parsed); });
     byId('impRunBtn').addEventListener('click', runImport);
+    byId('genTplBtn').addEventListener('click', generateTemplate);
+
+    // Drag & drop
+    const drop = byId('drop');
+    ['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); drop.classList.add('drag'); }));
+    ;['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, e=>{ e.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', async (e)=>{
+      const f = e.dataTransfer?.files?.[0];
+      if(!f){ return; }
+      state.parsed = await parseCsvFile(f);
+      if(state.parsed){ renderPreview(state.parsed); }
+    });
 
     async function loadWeek(){
       setStatus("Loading…");
@@ -377,13 +397,45 @@
       }
     }
 
+    function parseAmPm(s){
+      // Accepts M/D/YYYY H:MM AM/PM
+      const re = /^\\s*(\\d{1,2})[\\/](\\d{1,2})[\\/-](\\d{2,4})\\s+(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])\\s*$/;
+      const m = s.match(re);
+      if(!m) return null;
+      let [_, M, D, Y, h, min, ap] = m;
+      M=+M; D=+D; Y=+Y; h=+h; min=+min;
+      if(Y<100) Y += 2000;
+      if(ap.toLowerCase()==="pm" && h<12) h+=12;
+      if(ap.toLowerCase()==="am" && h===12) h=0;
+      const mm = String(M).padStart(2,'0');
+      const dd = String(D).padStart(2,'0');
+      const hh = String(h).padStart(2,'0');
+      const mmin = String(min).padStart(2,'0');
+      return `${Y}-${mm}-${dd}T${hh}:${mmin}:00`;
+    }
+
+    function toIso(localStr){
+      if(!localStr) return "";
+      const s = localStr.trim().replace(" ","T");
+      // Try native first
+      const d1 = new Date(s);
+      if(!isNaN(d1.getTime())) return d1.toISOString();
+      // Try AM/PM US format
+      const alt = parseAmPm(localStr);
+      if(alt){
+        const d2 = new Date(alt);
+        if(!isNaN(d2.getTime())) return d2.toISOString();
+      }
+      throw new Error("Invalid kickoff_local datetime: " + localStr);
+    }
+
     async function parseCsvFile(file){
-      if(!file){ alert("Pick a CSV file first."); return null; }
+      if(!file){ alert("Pick a CSV file first or drop it into the box."); return null; }
       const text = await file.text();
       const lines = text.split(/\\r?\\n/).filter(l => l.trim().length>0);
       if(lines.length<2){ alert("CSV has no data rows (after trimming). Make sure you saved as CSV UTF-8 and that there is at least one data row below the header."); return null; }
       let CSV_DELIM = (lines[0].includes(';') && !lines[0].includes(',')) ? ';' : ',';
-const headers = splitCsvLine(lines[0], CSV_DELIM).map(s=>s.trim().toLowerCase());
+      const headers = splitCsvLine(lines[0], CSV_DELIM).map(s=>s.trim().toLowerCase());
       const expected = ["day","kickoff_local","home","away","winner"];
       for(let i=0;i<expected.length;i++){
         if((headers[i]||"")!==expected[i]){
@@ -408,14 +460,6 @@ const headers = splitCsvLine(lines[0], CSV_DELIM).map(s=>s.trim().toLowerCase())
       return { headers, games, rows };
     }
 
-    function toIso(localStr){
-      if(!localStr) return "";
-      const s = localStr.trim().replace(" ","T");
-      const d = new Date(s);
-      if(isNaN(d.getTime())){ throw new Error("Invalid kickoff_local datetime: " + localStr); }
-      return d.toISOString();
-    }
-
     function splitCsvLine(line, delim){
       const out=[]; let cur=""; let inQ=false; const d = delim || ',';
       for(let i=0;i<line.length;i++){
@@ -428,6 +472,18 @@ const headers = splitCsvLine(lines[0], CSV_DELIM).map(s=>s.trim().toLowerCase())
       }
       out.push(cur);
       return out.map(s=>s.trim());
+    }
+
+    function generateTemplate(){
+      const csv = "day,kickoff_local,home,away,winner\\n";
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = "week-template.csv";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
     }
   </script>
 </body>
