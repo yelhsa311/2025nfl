@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Grid — Family NFL Picks (merged v3)</title>
+  <title>Admin Grid — Importer (v5)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
       --text:#ebf0f7; --muted:#96a0b5; --accent:#5aa6ff;
       --danger:#ef4444; --ok:#22c55e; --chip:#0f1729;
-      --input:#0f1420; --border:#232b3a;
+      --input:#0f1420; --border:#232b3a; --warn:#f59e0b;
     }
     *{box-sizing:border-box}
     body{margin:0; background:var(--bg); color:var(--text);
@@ -39,12 +39,25 @@
     .card{margin-top:14px; border:1px solid var(--border); border-radius:12px; background:var(--panel); padding:12px}
     code{background:#0c111b; border:1px solid var(--border); padding:2px 6px; border-radius:8px}
     #debugList{font-size:13px; color:var(--muted); max-height:180px; overflow:auto}
+
+    /* Modal */
+    .modal{position:fixed; inset:0; background:rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; z-index:50}
+    .modal.open{display:flex}
+    .modal .sheet{width:min(960px, 96vw); max-height:92vh; overflow:auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px}
+    .modal h3{margin:0 0 8px 0}
+    progress{width:100%; height:14px}
+    #log{white-space:pre-wrap; background:#0c111b; border:1px solid var(--border);
+      border-radius:10px; padding:10px; max-height:220px; overflow:auto; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px}
+    table{width:100%; border-collapse:collapse; font-size:14px}
+    th,td{border:1px solid var(--border); padding:6px 8px}
+    th{background:var(--panel-2); color:var(--muted)}
+    .warn{color:#f59e0b}
   </style>
 </head>
 <body>
   <header>
     <a href="/index.html">← Back to App</a>
-    <strong>Admin Grid (merged v3)</strong>
+    <strong>Admin Grid — Importer</strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -54,7 +67,16 @@
     <div class="toolbar">
       <div class="group">
         <label>Season <input id="seasonInput" type="number" min="2000" max="2100" value="2025" style="width:96px"></label>
-        <label>Week <select id="weekSelect"></select></label>
+        <label>Week 
+          <select id="weekSelect">
+            <option value="1">Week 1</option><option value="2">Week 2</option><option value="3">Week 3</option><option value="4">Week 4</option>
+            <option value="5">Week 5</option><option value="6">Week 6</option><option value="7">Week 7</option><option value="8">Week 8</option>
+            <option value="9">Week 9</option><option value="10">Week 10</option><option value="11">Week 11</option><option value="12">Week 12</option>
+            <option value="13">Week 13</option><option value="14">Week 14</option><option value="15">Week 15</option><option value="16">Week 16</option>
+            <option value="17">Week 17</option><option value="18">Week 18</option><option value="19">Week 19</option><option value="20">Week 20</option>
+            <option value="21">Week 21</option><option value="22">Week 22</option>
+          </select>
+        </label>
         <button id="refreshBtn">Refresh</button>
       </div>
       <span class="divider"></span>
@@ -77,6 +99,8 @@
         </label>
         <button id="loadUserBtn">Load</button>
         <button id="saveUserBtn" class="primary">Save Picks</button>
+        <button id="setUidBtn" title="Manually set UID mapping for this email">Set UID</button>
+        <button id="openImportBtn">📥 Import Week</button>
       </div>
     </div>
 
@@ -87,7 +111,7 @@
       <button id="allHomeBtn">All → home</button>
       <button id="allAwayBtn">All → away</button>
       <button id="clearUserBtn" class="btn-danger">Clear</button>
-      <span class="note">Load a user first.</span>
+      <span class="note">Load a user first. If header says <span class="warn">UID not found</span>, click “Set UID”.</span>
     </div>
 
     <div class="table">
@@ -106,12 +130,54 @@
     </div>
   </div>
 
+  <div id="importModal" class="modal" aria-hidden="true">
+    <div class="sheet">
+      <div style="display:flex; align-items:center; gap:10px">
+        <h3>Import Week & Picks</h3>
+        <div class="sp"></div>
+        <button id="closeImportBtn">Close</button>
+      </div>
+      <div class="card" style="margin-top:8px">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center">
+          <label>Season <input id="impSeason" type="number" min="2000" max="2100" value="2025" style="width:120px"></label>
+          <label>Week #
+            <select id="impWeek"></select>
+          </label>
+          <label><input id="impReplace" type="checkbox"> Replace games for this week (delete existing first)</label>
+          <label><input id="impDry" type="checkbox"> Dry-run (no writes)</label>
+          <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
+          <div class="note">CSV: day, kickoff_local (YYYY-MM-DD HH:MM), home, away, winner, then 1 column per user email with 'home'/'away' values.</div>
+          <div><a href="/week-template.csv" download>Download template</a></div>
+          <div class="sp"></div>
+          <div><button id="impPreviewBtn">Preview</button> <button id="impRunBtn" class="primary">Import</button></div>
+        </div>
+      </div>
+      <div id="previewCard" class="card" style="display:none">
+        <strong>Preview</strong>
+        <div class="status" id="previewInfo"></div>
+        <div style="max-height:360px; overflow:auto; margin-top:8px">
+          <table id="previewTable"></table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="status" id="impStatus">Idle.</div>
+        <progress id="impProg" max="100" value="0" style="display:none"></progress>
+        <details>
+          <summary>Details / Logs</summary>
+          <div id="log"></div>
+        </details>
+      </div>
+    </div>
+  </div>
+
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
-    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { 
-      getFirestore, collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, setDoc, getDoc, limit, serverTimestamp 
-    } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+      getAuth, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence 
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import { 
+      initializeFirestore, getFirestore, collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc, setDoc, getDoc, limit, serverTimestamp, writeBatch 
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const cfg = {
       apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
@@ -123,80 +189,72 @@
       measurementId: "G-MSJHYZ4VG2"
     };
     const app = initializeApp(cfg);
+    initializeFirestore(app, { experimentalAutoDetectLongPolling: true, useFetchStreams: false });
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    const ADMIN_EMAILS = ["yelhsa311@gmail.com"];
+    await setPersistence(auth, browserLocalPersistence);
+
+    const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
     const fmt2 = n => String(n).padStart(2,'0');
     const weekId = (season, w) => `${season}-Week-${fmt2(w)}`;
     const $ = sel => document.querySelector(sel);
     const byId = id => document.getElementById(id);
-    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const escapeHtml = s => (s??"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&gt;','"':'&quot;'}[c]));
     const uidFromEmail = email => (email||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,64);
 
     const state = { 
       season: 2025, weekNum: 1, weekId: weekId(2025,1), games: [],
-      currentUser: "",   // email
-      currentUid: "",    // resolved auth uid
-      picksByUser: new Map()
+      currentUser: "", currentUid: "", picksByUser: new Map(),
+      parsed: null
     };
 
-    // populate weeks
-    for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=`Week ${i}`; byId('weekSelect').appendChild(o); }
-    byId('weekSelect').value = "1";
+    byId('weekSelect').value="1";
+    for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
+    byId('impWeek').value="8";
 
     onAuthStateChanged(auth, async (user)=>{
       if(!user){ location.replace('/index.html'); return; }
+      if(!ADMIN_UIDS.includes(user.uid)){ alert("Admins only."); await signOut(auth); location.replace('/index.html'); return; }
       byId('userTag').textContent = user.email || "";
-      if(!ADMIN_EMAILS.includes((user.email||"").toLowerCase())){
-        alert("Admins only."); await signOut(auth); location.replace('/index.html'); return;
-      }
-      wireUI();
       await loadWeek();
     });
 
-    function wireUI(){
-      byId('seasonInput').addEventListener('change', ()=>{
-        state.season = Number(byId('seasonInput').value||2025);
-        state.weekId = weekId(state.season, state.weekNum);
-        loadWeek();
-      });
-      byId('weekSelect').addEventListener('change', ()=>{
-        state.weekNum = Number(byId('weekSelect').value||1);
-        state.weekId = weekId(state.season, state.weekNum);
-        loadWeek();
-      });
-      byId('refreshBtn').addEventListener('click', loadWeek);
-      byId('addGameBtn').addEventListener('click', addGame);
-      byId('saveChangesBtn').addEventListener('click', saveChanges);
+    byId('seasonInput').addEventListener('change', ()=>{ state.season=Number(byId('seasonInput').value||2025); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
+    byId('weekSelect').addEventListener('change', ()=>{ state.weekNum=Number(byId('weekSelect').value||1); state.weekId=weekId(state.season,state.weekNum); loadWeek(); });
+    byId('refreshBtn').addEventListener('click', loadWeek);
+    byId('addGameBtn').addEventListener('click', addGame);
+    byId('saveChangesBtn').addEventListener('click', saveChanges);
 
-      byId('loadUserBtn').addEventListener('click', onLoadUser);
-      byId('saveUserBtn').addEventListener('click', saveSelectedUser);
-      byId('fillBlanksHomeBtn').addEventListener('click', ()=> fillUserPicks("home", true));
-      byId('fillBlanksAwayBtn').addEventListener('click', ()=> fillUserPicks("away", true));
-      byId('allHomeBtn').addEventListener('click', ()=> fillUserPicks("home", false));
-      byId('allAwayBtn').addEventListener('click', ()=> fillUserPicks("away", false));
-      byId('clearUserBtn').addEventListener('click', clearUserPicks);
-    }
+    byId('loadUserBtn').addEventListener('click', onLoadUser);
+    byId('saveUserBtn').addEventListener('click', saveSelectedUser);
+    byId('fillBlanksHomeBtn').addEventListener('click', ()=> fillUserPicks("home", true));
+    byId('fillBlanksAwayBtn').addEventListener('click', ()=> fillUserPicks("away", true));
+    byId('allHomeBtn').addEventListener('click', ()=> fillUserPicks("home", false));
+    byId('allAwayBtn').addEventListener('click', ()=> fillUserPicks("away", false));
+    byId('clearUserBtn').addEventListener('click', clearUserPicks);
+
+    byId('openImportBtn').addEventListener('click', ()=> { $("#importModal").classList.add("open"); });
+    byId('closeImportBtn').addEventListener('click', ()=> { $("#importModal").classList.remove("open"); });
+    byId('impPreviewBtn').addEventListener('click', async ()=>{ state.parsed = await parseCsvFile(byId('impFile').files[0]); if(state.parsed){ renderPreview(state.parsed); } });
+    byId('impRunBtn').addEventListener('click', runImport);
 
     async function onLoadUser(){
       const email = (byId('userEmail').value||"").trim().toLowerCase();
       if (!email) { alert("Enter a user email first."); return; }
-      setStatus("Resolving user…");
+      byId('pickHeader').textContent = `Pick (${email}) — resolving…`;
       const uid = await resolveUidForEmail(email);
       state.currentUser = email;
       state.currentUid = uid || "";
-      byId('pickHeader').textContent = state.currentUid ? `Pick (${email})` : `Pick (${email}) — UID not found`;
+      byId('pickHeader').textContent = uid ? `Pick (${email})` : `Pick (${email}) — UID not found`;
       await loadWeek();
-      setStatus(`Loaded user: ${email}${state.currentUid ? ` (uid:${state.currentUid})` : ""}`);
+      setStatus(`Loaded user: ${email}${uid ? ` (uid:${uid})` : ""}`);
     }
 
     async function resolveUidForEmail(email){
-      // Expect /publicUsers/{uid} containing field emailLower: string
       const q1 = query(collection(db, "publicUsers"), where("emailLower", "==", email), limit(1));
       const s1 = await getDocs(q1);
       if (s1.size > 0) return s1.docs[0].id;
-      // fallback: try email field if older docs used 'email'
       const q2 = query(collection(db, "publicUsers"), where("email", "==", email), limit(1));
       const s2 = await getDocs(q2);
       if (s2.size > 0) return s2.docs[0].id;
@@ -206,7 +264,6 @@
     async function loadWeek(){
       setStatus("Loading…");
       byId('wid').textContent = state.weekId;
-      // Fetch WITHOUT orderBy; sort client-side
       const q = query(collection(db, "games"), where("weekId", "==", state.weekId));
       const snap = await getDocs(q);
       state.games = [];
@@ -216,7 +273,6 @@
       });
       state.games.sort((a,b)=> new Date(a.kickoff) - new Date(b.kickoff));
 
-      // Load picks for active user (uid preferred, legacy fallback)
       state.picksByUser.clear();
       if(state.currentUser){
         let picks = {};
@@ -225,7 +281,6 @@
           const psnap = await getDoc(pRef);
           if(psnap.exists()) picks = psnap.data().picks || {};
         } else {
-          // legacy email-slug path
           const legacyId = uidFromEmail(state.currentUser);
           const pRefLegacy = doc(db, "picks", legacyId, "weeks", state.weekId);
           const psnapLegacy = await getDoc(pRefLegacy);
@@ -235,7 +290,6 @@
       }
 
       renderGrid();
-      // debug
       byId('docCount').textContent = String(state.games.length);
       const list = state.games.slice(0,10).map(x=>`• ${x.home} vs ${x.away} (${x.day})`).join('<br>');
       byId('debugList').innerHTML = list || '<em>No games</em>';
@@ -279,7 +333,6 @@
         await deleteDoc(doc(db, "games", game.id));
         await loadWeek();
       });
-      // track pick changes
       const pickSel = node.querySelector('select[data-field="pick"]');
       if(pickSel){
         pickSel.addEventListener('change', ()=>{
@@ -361,7 +414,8 @@
       const picks = state.picksByUser.get(email) || {};
 
       if (!state.currentUid){
-        if (!confirm("No UID found for this email.\nSave to legacy email-slug path (main app may not see it)?")) return;
+        if (!confirm("No UID found for this email.
+Save to legacy email-slug path (main app may not see it)?")) return;
         const legacyId = uidFromEmail(email);
         const pRefLegacy = doc(db, "picks", legacyId, "weeks", state.weekId);
         await setDoc(pRefLegacy, { picks, savedAt: serverTimestamp() }, { merge: true });
@@ -383,6 +437,169 @@
     }
 
     function setStatus(m){ byId('status').textContent = m || ""; }
+
+    /* ===== Importer logic ===== */
+    function impSetStatus(m){ byId('impStatus').textContent = m||""; }
+    function impLog(m){ const L=byId('log'); L.textContent += (m + "\n"); L.scrollTop=L.scrollHeight; }
+    function impProg(p){ const el=byId('impProg'); el.style.display='block'; el.value=p; }
+
+    function renderPreview(p){
+      byId('previewInfo').textContent = `Games: ${p.games.length} • Users: ${p.users.length}`;
+      const tbl = byId('previewTable');
+      tbl.innerHTML = "";
+      const trh = document.createElement("tr");
+      ["day","kickoff_local","home","away","winner", ...p.users].forEach(h=>{
+        const th=document.createElement("th"); th.textContent=h; trh.appendChild(th);
+      });
+      tbl.appendChild(trh);
+      for(const r of p.rows){
+        const tr=document.createElement("tr");
+        [...r.std, ...r.userVals].forEach(v=>{ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); });
+        tbl.appendChild(tr);
+      }
+      byId('previewCard').style.display = "block";
+    }
+
+    async function runImport(){
+      if(!state.parsed){ alert("Preview the CSV first."); return; }
+      const season = Number(byId('impSeason').value||2025);
+      const wn = Number(byId('impWeek').value||1);
+      const wid = weekId(season, wn);
+      const replace = byId('impReplace').checked;
+      const dry = byId('impDry').checked;
+
+      impSetStatus("Importing…"); impLog(`Import start for ${wid}`); impProg(1);
+
+      try{
+        const uidMap = {};
+        for(const email of state.parsed.users){
+          const uid = await resolveUidForEmail(email);
+          uidMap[email] = uid || "";
+        }
+        impLog(`Resolved ${Object.values(uidMap).filter(Boolean).length}/${state.parsed.users.length} user UIDs`);
+
+        if(replace){
+          impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
+          const qs = query(collection(db,"games"), where("weekId","==", wid));
+          const snap = await getDocs(qs);
+          if(!dry){
+            const bDel = writeBatch(db);
+            snap.forEach(d=> bDel.delete(doc(db,"games", d.id)));
+            await bDel.commit();
+          }
+          impLog(`Deleted ${snap.size} game(s)`);
+        }
+        impProg(10);
+
+        const gameIds = [];
+        if(!dry){
+          const bGames = writeBatch(db);
+          for(const g of state.parsed.games){
+            const ref = doc(collection(db,"games"));
+            gameIds.push(ref.id);
+            bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso });
+          }
+          await bGames.commit();
+        } else {
+          for(let i=0;i<state.parsed.games.length;i++) gameIds.push(`SIM_${i}`);
+        }
+        impLog(`Wrote ${state.parsed.games.length} game(s)`);
+        impProg(60);
+
+        let ucount = 0;
+        for(const email of state.parsed.users){
+          const picksArr = state.parsed.picksByUser[email] || [];
+          const pm = {};
+          for(let i=0;i<gameIds.length;i++){
+            const choice = (picksArr[i]||"").toLowerCase();
+            if(choice==="home" || choice==="away"){ pm[gameIds[i]] = choice; }
+          }
+          const uid = uidMap[email];
+          if(!dry){
+            if(uid){
+              const pRef = doc(db, "picks", uid, "weeks", wid);
+              await setDoc(pRef, { picks: pm, savedAt: serverTimestamp() }, { merge: true });
+            } else {
+              const legacyId = uidFromEmail(email);
+              const pRefLegacy = doc(db, "picks", legacyId, "weeks", wid);
+              await setDoc(pRefLegacy, { picks: pm, savedAt: serverTimestamp() }, { merge: true });
+            }
+          }
+          ucount++;
+          if(ucount % 5 === 0) impProg(60 + Math.min(35, Math.floor(35*(ucount/state.parsed.users.length))));
+        }
+        impLog(`Updated ${state.parsed.users.length} user(s)`);
+        impProg(100);
+        impSetStatus("✅ Import complete.");
+        alert(`Import complete!\n\nGames added: ${state.parsed.games.length}\nUsers updated: ${state.parsed.users.length}${dry?'\n\n(DRY-RUN: no writes performed)':''}`);
+
+        if(wid === state.weekId) await loadWeek();
+      }catch(err){
+        console.error(err);
+        impSetStatus("❌ Import failed. See details below.");
+        impLog(err?.message || String(err));
+        alert("Import failed: " + (err?.message || String(err)));
+      }
+    }
+
+    async function parseCsvFile(file){
+      if(!file){ alert("Pick a CSV file first."); return null; }
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(l => l.trim().length>0);
+      if(lines.length<2){ alert("CSV has no data rows."); return null; }
+      const headers = splitCsvLine(lines[0]).map(s=>s.trim());
+      const std = ["day","kickoff_local","home","away","winner"];
+      for(let i=0;i<std.length;i++){
+        if((headers[i]||"").toLowerCase()!==std[i]){
+          alert("Expected first columns: day,kickoff_local,home,away,winner");
+          return null;
+        }
+      }
+      const users = headers.slice(std.length).map(h=>h.trim().toLowerCase()).filter(Boolean);
+      if(users.length===0){ alert("No user columns found after 'winner'."); return null; }
+
+      const games = [];
+      const rows = [];
+      const picksByUser = Object.fromEntries(users.map(u=>[u,[]]));
+
+      for(let li=1; li<lines.length; li++){
+        const cols = splitCsvLine(lines[li]);
+        if(cols.length===0) continue;
+        const [day, kickoffLocal, home, away, winner, ...userVals] = cols;
+        if(!day && !home && !away) continue;
+        const iso = toIso(kickoffLocal);
+        games.push({ day, home, away, winner: (winner||"").toLowerCase(), kickoffIso: iso });
+        rows.push({ std:[day,kickoffLocal,home,away,winner], userVals });
+        users.forEach((u, idx)=>{
+          const v = (userVals[idx]||"").toLowerCase();
+          picksByUser[u].push(v);
+        });
+      }
+
+      return { headers, users, games, picksByUser, rows };
+    }
+
+    function toIso(localStr){
+      if(!localStr) return "";
+      const s = localStr.trim().replace(" ","T");
+      const d = new Date(s);
+      if(isNaN(d.getTime())){ throw new Error("Invalid kickoff_local datetime: " + localStr); }
+      return d.toISOString();
+    }
+
+    function splitCsvLine(line){
+      const out=[]; let cur=""; let inQ=false;
+      for(let i=0;i<line.length;i++){
+        const ch=line[i];
+        if(ch=='"'){ 
+          if(inQ && line[i+1]=='"'){ cur+='"'; i++; }
+          else inQ=!inQ;
+        } else if(ch=="," && !inQ){ out.push(cur); cur=""; }
+        else cur+=ch;
+      }
+      out.push(cur);
+      return out.map(s=>s.trim());
+    }
   </script>
 </body>
 </html>
