@@ -213,22 +213,16 @@
 </div>
 
 <script type="module">
-  import {
-  initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp,
-  onSnapshot, collection, addDoc, query, orderBy, where, collectionGroup
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword,
     createUserWithEmailAndPassword, signOut
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { 
-    initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp, 
-    onSnapshot, collection, addDoc, query, orderBy 
+  import {
+    initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp,
+    onSnapshot, collection, addDoc, query, orderBy, where, collectionGroup, deleteDoc
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-  import { collectionGroup } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-  
+
   // --- Firebase config (yours) ---
   const firebaseConfig = {
     apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
@@ -310,8 +304,8 @@
     el("#adminToolbar").style.display  = state.isAdmin ? "" : "none";
 
     // Show or hide any .admin-only links (like Admin Grid)
-    document.querySelectorAll(".admin-only").forEach(el => {
-      el.style.display = state.isAdmin ? "" : "none";
+    document.querySelectorAll(".admin-only").forEach(n => {
+      n.style.display = state.isAdmin ? "" : "none";
     });
 
     el("#auth").style.display="none";
@@ -330,11 +324,10 @@
       o.value=id; o.textContent=`Week ${i}`;
       sel.appendChild(o);
     }
-    // Restore last viewed week if present
     const remembered = localStorage.getItem("lastWeekId");
     state.weekId = remembered || state.weekId;
     sel.value = state.weekId;
-  
+
     sel.onchange = () => {
       state.weekId = sel.value;
       localStorage.setItem("lastWeekId", state.weekId);
@@ -353,7 +346,7 @@
       const d = s.exists() ? s.data() : {};
       state.lock = !!d.locked;
       state.lockAt = (d.lockAt && d.lockAt.seconds) ? (d.lockAt.seconds * 1000) : null;
-      // Badge text: show Finalized, or a countdown/locked state
+      // Badge text
       const now = Date.now();
       const autoLocked = state.lockAt ? now >= state.lockAt : false;
       let label = "Open";
@@ -402,7 +395,6 @@
       if (state.isAdmin){
         const ms = computeAutoLockAtMs();
         const want = ms ? Timestamp.fromMillis(ms) : null;
-        // Only write if changed or not set
         onSnapshot(lockRef, s => {
           const d = s.exists() ? s.data() : {};
           const cur = d.lockAt && d.lockAt.seconds ? d.lockAt.seconds * 1000 : null;
@@ -429,7 +421,7 @@
     el("#clearGamesBtn").onclick = clearGames;
   }
 
-  // --- Rendering (group by day, sort by kickoffTs; tolerant to variations) ---
+  // --- Rendering ---
   function renderGames(){
     const list = el("#gameList"); list.innerHTML="";
 
@@ -499,7 +491,6 @@
         });
       }
 
-      // tooltips
       home.setAttribute("title", home.getAttribute("aria-label") || g.home);
       away.setAttribute("title", away.getAttribute("aria-label") || g.away);
 
@@ -527,11 +518,9 @@
 
     el("#noGames").style.display = any ? "none" : "";
 
-    // Update week label on standings card
     const wk = Number(state.weekId.split("-").pop());
     el("#wkNum").textContent = String(wk);
 
-    // Recompute standings whenever games render
     computeWeekStandings();
   }
 
@@ -574,11 +563,11 @@
     const snap = await getDocs(colRef);
     let n=0; for (const d of snap.docs){ await deleteDoc(d.ref); n++; }
     console.log("Cleared", n, "games for", state.weekId);
-    toast("Cleared " + n + " games");
+    toast("Cleared " + n + "games");
     computeWeekStandings();
   }
 
-  // Seeder (kept from your file)
+  // Seeder (kept)
   async function seedWeek1(items){
     if (!state.isAdmin){ console.warn("Admin only"); return; }
     const col = collection(db, "weeks", state.weekId, "games");
@@ -603,108 +592,95 @@
   }
 
   async function computeWeekStandings(){
-  try{
-    // Winners for THIS week
-    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-    const winners = {};
-    let totalGames = 0;
-    gamesSnap.forEach(d => {
-      const g = d.data();
-      if (g.winner === "home" || g.winner === "away") {
-        winners[d.id] = g.winner;
-        totalGames++;
-      }
-    });
+    try{
+      // Winners for THIS week
+      const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+      const winners = {};
+      let totalGames = 0;
+      gamesSnap.forEach(d => {
+        const g = d.data();
+        if (g.winner === "home" || g.winner === "away") {
+          winners[d.id] = g.winner;
+          totalGames++;
+        }
+      });
 
-    // All picks docs for THIS week only
-    const picksQ = query(collectionGroup(db, "weeks"), where("weekId", "==", state.weekId));
-    const picksSnap = await getDocs(picksQ);
+      // All picks docs for THIS week only
+      const picksQ = query(collectionGroup(db, "weeks"), where("weekId", "==", state.weekId));
+      const picksSnap = await getDocs(picksQ);
 
-    // Aggregate by email (dedupe)
-    const rowsByEmail = new Map(); // emailLower -> { email, wins, played }
-    picksSnap.forEach(docSnap => {
-      const data = docSnap.data();
-      const email = (data.email || "").trim();
-      if (!email) return; // skip if missing email
+      // Aggregate by email (dedupe)
+      const rowsByEmail = new Map(); // emailLower -> { email, wins, played }
+      picksSnap.forEach(docSnap => {
+        const data = docSnap.data();
+        const email = (data.email || "").trim();
+        if (!email) return;
 
-      const picks = data.picks || {};
-      let wins = 0, played = 0;
+        const picks = data.picks || {};
+        let wins = 0, played = 0;
 
-      // count only games with winners set
-      for (const [gameId, side] of Object.entries(picks)) {
-        const w = winners[gameId];
-        if (!w) continue; // game not decided
-        played++;
-        if (w === side) wins++;
-      }
+        for (const [gameId, side] of Object.entries(picks)) {
+          const w = winners[gameId];
+          if (!w) continue;
+          played++;
+          if (w === side) wins++;
+        }
 
-      const key = email.toLowerCase();
-      const curr = rowsByEmail.get(key);
-      if (!curr) {
-        rowsByEmail.set(key, { email, wins, played });
-      } else {
-        // If multiple docs exist for the same email, merge (sum)
-        curr.wins += wins;
-        curr.played += played;
-      }
-    });
+        const key = email.toLowerCase();
+        const curr = rowsByEmail.get(key);
+        if (!curr) {
+          rowsByEmail.set(key, { email, wins, played });
+        } else {
+          curr.wins += wins;
+          curr.played += played;
+        }
+      });
 
-    const rows = Array.from(rowsByEmail.values());
-    rows.sort((a,b) => b.wins - a.wins || a.email.localeCompare(b.email));
-    renderStandingsTable(rows, totalGames);
-  }catch(e){
-    console.error("standings error", e);
-    el("#standingsBody").innerHTML = `<div class="muted">Unable to compute standings (${e.message}).</div>`;
-  }
-}
-
-
-      rows.sort((a,b)=> b.wins - a.wins || a.email.localeCompare(b.email));
+      const rows = Array.from(rowsByEmail.values());
+      rows.sort((a,b) => b.wins - a.wins || a.email.localeCompare(b.email));
       renderStandingsTable(rows, totalGames);
     }catch(e){
       console.error("standings error", e);
-      el("#standingsBody").innerHTML = `<div class=muted>Unable to compute standings (${e.message}).</div>`;
+      el("#standingsBody").innerHTML = `<div class="muted">Unable to compute standings (${e.message}).</div>`;
     }
   }
 
   function renderStandingsTable(rows, totalGames){
     if (!rows.length){
-      el("#standingsBody").innerHTML = `<div class=muted>No data yet.</div>`;
+      el("#standingsBody").innerHTML = `<div class="muted">No data yet.</div>`;
       return;
     }
-  
-    // figure out leaders + my email
+
     const myEmail = state.user?.email || "";
     const maxWins = Math.max(...rows.map(r => r.wins));
     const pct = (w, t) => t ? (w/t*100).toFixed(1)+"%" : "—";
-  
+
     const html = [
       `<table class="standings-table"><thead><tr>
         <th>Rank</th><th>User</th><th>Wins</th><th>Played</th><th>Win %</th>
       </tr></thead><tbody>`
     ];
-  
+
     rows.forEach((r, i) => {
       const isLeader = r.wins === maxWins && r.played > 0;
       const isMe = r.email === myEmail;
       const isPerfect = r.played > 0 && r.wins === r.played;
       const isSub500 = r.played > 0 && (r.wins / r.played) < 0.5;
-  
+
       const rowClasses = [
         isLeader ? "leader" : "",
         isMe ? "me" : "",
         isPerfect ? "perfect" : "",
         isSub500 ? "sub500" : ""
       ].filter(Boolean).join(" ");
-  
-      // small chips after the user cell
+
       const chips = [
         isLeader ? `<span class="badge-chip leader">🥇 Leader</span>` : "",
         isMe ? `<span class="badge-chip me">⭐ You</span>` : "",
         isPerfect ? `<span class="badge-chip perfect">🏆 Perfect</span>` : "",
         isSub500 ? `<span class="badge-chip sub500">↘ Sub-.500</span>` : ""
       ].join("");
-  
+
       html.push(
         `<tr class="${rowClasses}">
           <td>${i+1}</td>
@@ -715,14 +691,13 @@
         </tr>`
       );
     });
-  
+
     html.push(`</tbody></table>`);
     el("#standingsBody").innerHTML = html.join("");
   }
 
   async function publishWeekStandings(){
     if (!state.isAdmin) return;
-    // Save a compact leaderboard doc per user so we can sum for overall later
     const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
     const winners = {}; gamesSnap.forEach(d => { const g=d.data(); if (g.winner) winners[d.id]=g.winner; });
 
@@ -744,5 +719,6 @@
   window.appState = state;
   window.db = db;
 </script>
+
 </body>
 </html>
