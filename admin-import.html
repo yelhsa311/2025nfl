@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v8.3)</title>
+  <title>Admin Importer — Games Only (v8.4)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./index.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.3</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.4</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -246,7 +246,7 @@
     async function loadWeek(){
       try{
         setStatus("Loading…"); byId('wid').textContent = state.weekId;
-        const snap = await db.collection('games').where('weekId','==', state.weekId).get();
+        const snap = await db.collection('weeks').doc(state.weekId).collection('games').orderBy('kickoffTs').get();
         state.games = [];
         snap.forEach(function(d){
           var g = d.data();
@@ -282,7 +282,7 @@
         + '<div class="right"><button class="btn-danger" type="button" data-action="delete">Delete</button></div>';
       node.querySelector('[data-action="delete"]').addEventListener('click', async function(){
         if(!confirm("Delete this game?")) return;
-        await db.collection('games').doc(game.id).delete();
+        await db.collection('weeks').doc(state.weekId).collection('games').doc(game.id).delete();
         await loadWeek();
       });
       return node;
@@ -300,7 +300,10 @@
           away: r.querySelector('[data-field="away"]').value.trim(),
           winner: r.querySelector('[data-field="winner"]').value || ""
         };
-        await db.collection('games').doc(id).update(payload);
+        await db.collection('weeks').doc(state.weekId).collection('games').doc(id).update({
+          ...payload,
+          kickoffTs: payload.kickoff ? new Date(payload.kickoff).getTime() : null
+        });
         count++;
       }
       setStatus("Saved " + count + " game(s).");
@@ -312,8 +315,9 @@
       const away = byId('awayInput').value.trim();
       const kick = byId('kickoffInput').value;
       if(!home || !away || !kick){ alert("Fill Home, Away, Kickoff."); return; }
-      const payload = { weekId: state.weekId, day, home, away, kickoff: new Date(kick).toISOString(), winner: "" };
-      await db.collection('games').add(payload);
+      const kickoffIso = new Date(kick).toISOString();
+      const payload = { weekId: state.weekId, day, home, away, kickoff: kickoffIso, kickoffTs: new Date(kickoffIso).getTime(), winner: "" };
+      await db.collection('weeks').doc(state.weekId).collection('games').add(payload);
       byId('homeInput').value=""; byId('awayInput').value=""; byId('kickoffInput').value="";
       await loadWeek();
     }
@@ -480,10 +484,10 @@
 
         if(replace){
           impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
-          const qs = await db.collection('games').where('weekId','==', wid).get();
+          const qs = await db.collection('weeks').doc(wid).collection('games').get();
           if(!dry){
             const bDel = db.batch();
-            qs.forEach(function(d){ bDel.delete(db.collection('games').doc(d.id)); });
+            qs.forEach(function(d){ bDel.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); });
             await bDel.commit();
           }
           impLog("Deleted " + qs.size + " game(s)");
@@ -494,9 +498,9 @@
         if(!dry){
           const bGames = db.batch();
           state.parsed.games.forEach(function(g){
-            const ref = db.collection('games').doc();
-            bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso });
-            if(pickUid && g.pick){ picksPayload[ref.id] = g.pick; }
+            const ref = db.collection('weeks').doc(wid).collection('games').doc();
+            const kickoffTs = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
+            bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso, kickoffTs, createdAt: Date.now() });
           });
           await bGames.commit();
         }
