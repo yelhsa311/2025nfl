@@ -161,6 +161,8 @@
     function byId(id){ return document.getElementById(id); }
     const fmt2 = n => String(n).padStart(2,'0');
     const weekId = (season, w) => season + "-Week-" + fmt2(w);
+    const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    const uidFromEmail = email => slug(email).slice(0,64);
     function toLocal(iso){ if(!iso) return ""; const d=new Date(iso);
       const y=d.getFullYear(), m=fmt2(d.getMonth()+1), da=fmt2(d.getDate()), h=fmt2(d.getHours()), mi=fmt2(d.getMinutes());
       return y+"-"+m+"-"+da+"T"+h+":"+mi;
@@ -440,10 +442,10 @@
         games.push({ day:day, home:home, away:away, winner:winnerNorm, kickoffIso: iso });
         rows.push({ std:[day,kickoffDate,kickoffTime,kickoffLocal,home,away,winnerNorm] });
       }
-      return { headers:headers, games:games, rows:rows };
+      return { headers:headers, games:games, rows:rows, hasPick: hasPick };
     }
     function renderPreview(p){
-      byId('previewInfo').textContent = "Games: " + p.games.length;
+      byId('previewInfo').textContent = "Games: " + p.games.length + (p.hasPick ? " • picks included" : "");
       const tbl = byId('previewTable'); tbl.innerHTML="";
       const trh = document.createElement("tr");
       ["day","kickoff_date","kickoff_time","kickoff_local","home","away","winner"].forEach(function(h){ const th=document.createElement("th"); th.textContent=h; trh.appendChild(th); });
@@ -492,6 +494,7 @@
         }
         impProg(15);
 
+        let picksPayload = {};
         if(!dry){
           const bGames = db.batch();
           state.parsed.games.forEach(function(g){
@@ -502,6 +505,16 @@
           await bGames.commit();
         }
         impLog("Wrote " + state.parsed.games.length + " game(s)");
+
+        if(!dry && pickUid && Object.keys(picksPayload).length){
+          await db.collection('picks').doc(pickUid).collection('weeks').doc(wid).set({
+            email: pickUser,
+            weekId: wid,
+            picks: picksPayload,
+            updatedAt: Date.now()
+          }, { merge:true });
+          impLog("Stored picks for " + pickUser + " (" + Object.keys(picksPayload).length + " games)");
+        }
         impProg(100);
         impSetStatus("✅ Import complete.");
         alert("Import complete!\\n\\nGames added: " + state.parsed.games.length + (dry ? "\\n\\n(DRY-RUN: no writes performed)" : ""));
