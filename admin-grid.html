@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NFL Picks — Admin Grid</title>
+<title>NFL Picks — Admin Grid (v1.3)</title>
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
@@ -28,12 +28,17 @@
   .btn-danger:hover{background:#7a2a2a}
   .chip{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border:1px solid var(--border);border-radius:999px}
   .divider{height:1px;background:var(--border);margin:8px 0}
-.import-link{margin-left:12px; color:#5aa6ff; text-decoration:none;} .import-link:hover{text-decoration:underline;}</style>
+  .version-pill{background:#0f1629;border-color:#2d3a55;color:#9cc7ff}
+  .import-link{margin-left:12px; color:#5aa6ff; text-decoration:none;} .import-link:hover{text-decoration:underline;}
+</style>
 </head>
 <body>
 <div class="wrap">
   <div class="row" style="justify-content:space-between">
-    <h1 style="margin:.2rem 0">Admin Grid</h1>
+    <div class="row" style="align-items:center; gap:10px">
+      <h1 style="margin:.2rem 0">Admin Grid</h1>
+      <span class="pill version-pill">v1.3</span>
+    </div>
     <div class="row">
       <a class="pill" href="index.html">← Back to App</a> <a href='./admin-import.html' class='import-link'>📥 Go to Importer</a>
       <span id="userTag" class="pill"></span>
@@ -165,6 +170,7 @@
   const setStatus = t => { el("#status").textContent = t || ""; };
   const fmtTime = ts => ts ? new Date(ts).toLocaleString([], { month:"short", day:"2-digit", hour:"numeric", minute:"2-digit" }) : "";
   const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  const parseEmails = raw => (raw||"").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   const uidFromEmail = email => slug(email).slice(0,64);
 
   const state = {
@@ -217,9 +223,10 @@
 
     // actions
     byId("refreshBtn").onclick = loadWeek;
-    byId("applyUsersBtn").onclick = applyUsers;
+    byId("applyUsersBtn").onclick = ()=> applyUsers();
     byId("saveBtn").onclick = saveAll;
     byId("addGameBtn").onclick = addGame;
+    byId("clearGamesBtn").onclick = clearGamesForWeek;
 
     byId("scanOrphansBtn").onclick = scanOrphans;
     byId("fixOrphansBtn").onclick = fixOrphans;
@@ -259,11 +266,13 @@
     byId("usersInput").value = (state.users||[]).join(", ");
     refreshUserSelect();
   }
-  function applyUsers(){
-    const emails = byId("usersInput").value.split(",").map(s=>s.trim()).filter(Boolean);
+  async function applyUsers(){
+    const emails = parseEmails(byId("usersInput").value);
     state.users = emails;
     saveUsersPref();
+    await loadPicksForUsers();
     renderGrid();
+    setStatus(state.users.length ? `Users applied (${state.users.length}).` : "Add at least one user to use quick tools.");
   }
   function refreshUserSelect(){
     const sel = byId("userSelect");
@@ -272,6 +281,32 @@
       const opt = document.createElement("option");
       opt.value = email; opt.textContent = email;
       sel.appendChild(opt);
+    }
+    if (!sel.value && sel.options.length){ sel.value = sel.options[0].value; }
+  }
+
+  async function clearGamesForWeek(){
+    if(!confirm(`Delete ALL games for ${state.weekId}?\n\nThis will also prune related picks.`)) return;
+    try{
+      setStatus("Deleting all games for week…");
+      const snap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+      if (snap.empty){ setStatus("No games to delete for this week."); return; }
+
+      const ids = snap.docs.map(d => d.id);
+      let batch = writeBatch(db), opCount = 0;
+      for (const d of snap.docs){
+        batch.delete(d.ref); opCount++;
+        if (opCount >= 450){ await batch.commit(); batch = writeBatch(db); opCount = 0; }
+      }
+      if (opCount > 0) await batch.commit();
+
+      await pruneGamesFromAllPicks(state.weekId, ids);
+      setStatus(`Deleted ${ids.length} game${ids.length===1?'':'s'} and pruned picks.`);
+      await loadWeek();
+    }catch(e){
+      console.error(e);
+      setStatus("Clear week error: " + (e.message||e));
+      alert("Clear week error: " + (e.message||e));
     }
   }
 
@@ -335,16 +370,7 @@
       state.users = [...merged];
       saveUsersPref();
 
-      // prefetch picks for listed users
-      for (const email of state.users){
-        const uid = uidFromEmail(email);
-        const pRef = doc(db,"picks",uid,"weeks",state.weekId);
-        try{
-          const psnap = await getDoc(pRef);
-          const picks = psnap.exists() ? (psnap.data().picks||{}) : {};
-          state.picksByUser.set(email, picks);
-        }catch{}
-      }
+      await loadPicksForUsers();
 
       renderGrid();
       setStatus(state.games.length ? "" : "No games found for "+state.weekId);
@@ -637,6 +663,21 @@
   }
 
   function cssEscape(s){ return s.replace(/["\\]/g, "\\$&"); }
+
+  async function loadPicksForUsers(){
+    state.picksByUser.clear();
+    for (const email of state.users){
+      const uid = uidFromEmail(email);
+      const pRef = doc(db,"picks",uid,"weeks",state.weekId);
+      try{
+        const psnap = await getDoc(pRef);
+        const picks = psnap.exists() ? (psnap.data().picks||{}) : {};
+        state.picksByUser.set(email, picks);
+      }catch{}
+    }
+    refreshUserSelect();
+    if (!state.users.length){ setStatus("Add users to enable quick tools."); }
+  }
 
   async function saveSelectedUser(){
     const email = getSelectedUserEmail(); if (!email) return;
