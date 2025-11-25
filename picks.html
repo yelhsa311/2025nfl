@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v10)</title>
+  <title>NFL Picks • User (v10.1)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -31,6 +31,7 @@
     th{background:#0b0f1f;color:#b7c0ff}
     tbody tr:hover{background:#0f1430}
     .pill{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1130;color:#c7d0ff}
+    .version{background:#0d1a36;border-color:#2d3a55;color:#9cc7ff;padding:5px 10px;font-size:12px}
     .winner{font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:#101542;color:#c7d0ff;margin-left:8px}
     .status-ok{color:var(--ok)}
     .status-bad{color:var(--danger)}
@@ -38,7 +39,10 @@
 </head>
 <body>
   <header>
-    <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
+    <div class="row" style="align-items:center; gap:10px">
+      <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
+      <span class="pill version">v10.1</span>
+    </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
       <button id="btnSignOut" class="ghost" style="display:none" type="button">Sign out</button>
