@@ -448,11 +448,6 @@
         if(!day && !home && !away) continue;
         if(!home || !away){ alert("Missing home/away team on row " + (li+1)); return null; }
         const iso = toIso(kickoffLocal);
-        if(iso && (!kickoffDate || !kickoffTime)){
-          const parts = partsFromIso(iso);
-          if(!kickoffDate) kickoffDate = parts.date;
-          if(!kickoffTime) kickoffTime = parts.time;
-        }
         const winnerNorm = normalizeSide(winner, home, away);
         const pickNorm = normalizeSide(pickRaw, home, away);
         games.push({ day:day, home:home, away:away, winner:winnerNorm, kickoffIso: iso, pick: pickNorm });
