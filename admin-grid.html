@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NFL Picks — Admin Grid (v1.3)</title>
+<title>NFL Picks — Admin Grid (v1.4)</title>
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
@@ -37,7 +37,7 @@
   <div class="row" style="justify-content:space-between">
     <div class="row" style="align-items:center; gap:10px">
       <h1 style="margin:.2rem 0">Admin Grid</h1>
-      <span class="pill version-pill">v1.3</span>
+      <span class="pill version-pill">v1.4</span>
     </div>
     <div class="row">
       <a class="pill" href="index.html">← Back to App</a> <a href='./admin-import.html' class='import-link'>📥 Go to Importer</a>
@@ -48,12 +48,15 @@
 
   <!-- LOGIN -->
   <div id="auth" class="card">
-    <div class="row">
-      <input id="email" type="email" placeholder="Email">
-      <input id="pass" type="password" placeholder="Password">
-      <button id="signInBtn" class="primary">Sign in</button>
+    <div class="row" style="flex-wrap:wrap; gap:10px; align-items:flex-start;">
+      <div class="row" style="gap:8px">
+        <input id="email" type="email" placeholder="Email">
+        <input id="pass" type="password" placeholder="Password">
+        <button id="signInBtn" class="primary">Sign in</button>
+      </div>
+      <button id="googleBtn" style="display:flex; align-items:center; gap:8px;">➡️ Sign in with Google</button>
     </div>
-    <div class="muted" style="margin-top:6px">Admins only. Manage games, winners, and user picks per week.</div>
+    <div id="authMsg" class="muted" style="margin-top:6px">Admins only. Manage games, winners, and user picks per week.</div>
   </div>
 
   <!-- APP -->
@@ -138,7 +141,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
   import {
     getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch,
     query, orderBy, addDoc, deleteDoc, collectionGroup, deleteField
@@ -157,6 +160,7 @@
   // --- Init ---
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
+  setPersistence(auth, browserLocalPersistence).catch(()=>{});
   const db = getFirestore(app);
 
   // --- Admin allowlist ---
@@ -198,10 +202,9 @@
     el("#adminTag").style.display = isAdmin ? "" : "none";
 
     if (!isAdmin) {
-      alert(
-        `Admins only.\n\nAdd this UID to ADMIN_UIDS or email to ADMIN_EMAILS:\n` +
-        `UID: ${user.uid}\nEmail: ${user.email}`
-      );
+      const msg = `Admins only. Add this UID to ADMIN_UIDS or email to ADMIN_EMAILS.`;
+      byId("authMsg").textContent = `${msg} UID: ${user.uid} Email: ${user.email || "(no email)"}`;
+      alert(`${msg}\n\nUID: ${user.uid}\nEmail: ${user.email}`);
       signOut(auth); // Non-blocking
       return;
     }
@@ -250,6 +253,18 @@
     }catch(e){ alert(e.message); }
   };
 
+  // Google sign-in helper
+  byId("googleBtn").onclick = async ()=>{
+    try{
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    }catch(e){
+      console.error(e);
+      byId("authMsg").textContent = e.message || String(e);
+      alert(e.message || String(e));
+    }
+  };
+
   // Users prefs
   function saveUsersPref(){
     localStorage.setItem("adminGridUsers:"+state.weekId, JSON.stringify(state.users));
@@ -283,31 +298,6 @@
       sel.appendChild(opt);
     }
     if (!sel.value && sel.options.length){ sel.value = sel.options[0].value; }
-  }
-
-  async function clearGamesForWeek(){
-    if(!confirm(`Delete ALL games for ${state.weekId}?\n\nThis will also prune related picks.`)) return;
-    try{
-      setStatus("Deleting all games for week…");
-      const snap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-      if (snap.empty){ setStatus("No games to delete for this week."); return; }
-
-      const ids = snap.docs.map(d => d.id);
-      let batch = writeBatch(db), opCount = 0;
-      for (const d of snap.docs){
-        batch.delete(d.ref); opCount++;
-        if (opCount >= 450){ await batch.commit(); batch = writeBatch(db); opCount = 0; }
-      }
-      if (opCount > 0) await batch.commit();
-
-      await pruneGamesFromAllPicks(state.weekId, ids);
-      setStatus(`Deleted ${ids.length} game${ids.length===1?'':'s'} and pruned picks.`);
-      await loadWeek();
-    }catch(e){
-      console.error(e);
-      setStatus("Clear week error: " + (e.message||e));
-      alert("Clear week error: " + (e.message||e));
-    }
   }
 
   async function clearGamesForWeek(){
