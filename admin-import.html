@@ -182,6 +182,9 @@
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
+    // Legacy guard: older pick-import code referenced hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
+    const hasPick = false;
+    const hasPickUser = false;
     for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
     byId('impWeek').value="1"; byId('weekSelect').value="1";
 
