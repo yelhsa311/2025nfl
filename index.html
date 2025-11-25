@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks</title>
+<title>Family NFL Picks (v1.0)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -139,6 +139,7 @@
   .toast.show{opacity:1}
   .badge{font-size:12px;border:1px solid var(--border);border-radius:6px;padding:2px 6px;background:var(--card);color:var(--fg);cursor:pointer}
   .admin-chip{font-size:11px;opacity:.85}
+  .version-pill{background:#0d1428;color:#9cc7ff;border-color:#2d3a55;font-size:12px;}
   table{width:100%;border-collapse:collapse;margin-top:8px}
   th,td{border:1px solid var(--border);padding:8px;text-align:left}
   th{background:#12151c}
@@ -147,7 +148,10 @@
 <body>
 <div class="wrap">
   <div class="bar">
-    <h1 style="margin:0">Family NFL Picks</h1>
+    <div class="row" style="align-items:center; gap:8px">
+      <h1 style="margin:0">Family NFL Picks</h1>
+      <span class="pill version-pill">v1.0</span>
+    </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
     <a href="admin-grid.html" class="admin-only" style="margin-left:10px;">🗂 Admin Grid</a>
