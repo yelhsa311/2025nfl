@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v8.2)</title>
+  <title>Admin Importer — Games Only (v8.3)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./index.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.2</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.3</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -182,7 +182,8 @@
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
-    // Legacy guard: older pick-import code referenced hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
+    // Legacy guard: older pick-import code referenced pickUid/hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
+    var pickUid = null;
     const hasPick = false;
     const hasPickUser = false;
     for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
