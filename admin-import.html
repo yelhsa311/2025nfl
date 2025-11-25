@@ -168,6 +168,14 @@
       const y=d.getFullYear(), m=fmt2(d.getMonth()+1), da=fmt2(d.getDate()), h=fmt2(d.getHours()), mi=fmt2(d.getMinutes());
       return y+"-"+m+"-"+da+"T"+h+":"+mi;
     }
+    function partsFromIso(iso){
+      if(!iso) return { date:"", time:"" };
+      const d = new Date(iso);
+      if(isNaN(d.getTime())) return { date:"", time:"" };
+      const date = [fmt2(d.getMonth()+1), fmt2(d.getDate()), d.getFullYear()].join('/');
+      const time = fmt2(d.getHours()) + ':' + fmt2(d.getMinutes());
+      return { date, time };
+    }
     function setStatus(m){ byId('status').textContent = m||""; }
     function impSetStatus(m){ byId('impStatus').textContent = m||""; }
     function impLog(m){ var L=byId('log'); L.textContent += (m+"\\n"); L.scrollTop=L.scrollHeight; }
@@ -426,8 +434,8 @@
         if(cols.length===0) continue;
         const day = cols[idx.day];
         const kickoffLocal = idx.kickoff >=0 ? cols[idx.kickoff] : combineDateTime(cols[idx.kickoffDate], cols[idx.kickoffTime]);
-        const kickoffDate = idx.kickoffDate >=0 ? cols[idx.kickoffDate] : "";
-        const kickoffTime = idx.kickoffTime >=0 ? cols[idx.kickoffTime] : "";
+        let kickoffDate = idx.kickoffDate >=0 ? cols[idx.kickoffDate] : "";
+        let kickoffTime = idx.kickoffTime >=0 ? cols[idx.kickoffTime] : "";
         let home = hasTeams ? (cols[idx.home]||"") : "";
         let away = hasTeams ? (cols[idx.away]||"") : "";
         const matchup = hasMatchup ? (cols[idx.matchup]||"") : "";
