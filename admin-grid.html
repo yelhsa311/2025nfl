@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NFL Picks — Admin Grid (v1.4)</title>
+<title>NFL Picks — Admin Grid (v1.5)</title>
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
@@ -37,7 +37,7 @@
   <div class="row" style="justify-content:space-between">
     <div class="row" style="align-items:center; gap:10px">
       <h1 style="margin:.2rem 0">Admin Grid</h1>
-      <span class="pill version-pill">v1.4</span>
+      <span class="pill version-pill">v1.5</span>
     </div>
     <div class="row">
       <a class="pill" href="index.html">← Back to App</a> <a href='./admin-import.html' class='import-link'>📥 Go to Importer</a>
@@ -144,7 +144,7 @@
   import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
   import {
     getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch,
-    query, orderBy, addDoc, deleteDoc, collectionGroup, deleteField
+    query, orderBy, addDoc, deleteDoc, collectionGroup, deleteField, where
   } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
   // --- Firebase config (yours) ---
@@ -385,11 +385,16 @@
       state.users = [...merged];
       saveUsersPref();
 
+      // fallback: pull user emails from existing picks if none configured yet
+      if (!state.users.length) {
+        await hydrateUsersFromPicks();
+      }
+
       await loadPicksForUsers();
 
-      renderGrid();
-      setStatus(state.games.length ? "" : "No games found for "+state.weekId);
-    }catch(e){
+    renderGrid();
+    setStatus(state.games.length ? "" : "No games found for "+state.weekId);
+  }catch(e){
       console.error(e);
       setStatus("Load error: " + (e.message||e));
     }
@@ -692,6 +697,31 @@
     }
     refreshUserSelect();
     if (!state.users.length){ setStatus("Add users to enable quick tools."); }
+  }
+
+  // Auto-collect users from existing picks when none are set locally
+  async function hydrateUsersFromPicks(){
+    try {
+      const q = query(collectionGroup(db, "weeks"), where("weekId", "==", state.weekId));
+      const snap = await getDocs(q);
+      const merged = new Set(state.users || []);
+      snap.forEach(d => {
+        const data = d.data() || {};
+        const email = (data.email || "").trim() || d.ref.path.split("/")[1] || "";
+        if (email) merged.add(email);
+      });
+      state.users = [...merged];
+      refreshUserSelect();
+      if (state.users.length) {
+        saveUsersPref();
+        setStatus(`Loaded ${state.users.length} user${state.users.length===1?'':'s'} from picks.`);
+      } else {
+        setStatus("No users found for this week. Add emails to use quick tools.");
+      }
+    } catch (e) {
+      console.error(e);
+      setStatus("User load error: " + (e.message || e));
+    }
   }
 
   async function saveSelectedUser(){
