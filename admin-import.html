@@ -124,7 +124,8 @@
           <label><input id="impReplace" type="checkbox"> Replace games for this week (delete existing first)</label>
           <label><input id="impDry" type="checkbox"> Dry-run (no writes)</label>
           <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
-          <div class="role">CSV columns: day,kickoff_local,home,away,winner</div>
+          <div class="role">CSV columns: day,kickoff_date,kickoff_time,home,away,matchup,winner,pick (kickoff_local also accepted)</div>
+          <label>Pick user (optional) <input id="impPickUser" placeholder="email for picks import"></label>
           <div><button id="genTplBtn" type="button">Generate template</button></div>
           <div class="sp"></div>
           <div><button id="impPreviewBtn" type="button">Preview</button> <button id="impRunBtn" type="button" class="primary">Import</button></div>
@@ -161,9 +162,19 @@
     function byId(id){ return document.getElementById(id); }
     const fmt2 = n => String(n).padStart(2,'0');
     const weekId = (season, w) => season + "-Week-" + fmt2(w);
+    const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    const uidFromEmail = email => slug(email).slice(0,64);
     function toLocal(iso){ if(!iso) return ""; const d=new Date(iso);
       const y=d.getFullYear(), m=fmt2(d.getMonth()+1), da=fmt2(d.getDate()), h=fmt2(d.getHours()), mi=fmt2(d.getMinutes());
       return y+"-"+m+"-"+da+"T"+h+":"+mi;
+    }
+    function partsFromIso(iso){
+      if(!iso) return { date:"", time:"" };
+      const d = new Date(iso);
+      if(isNaN(d.getTime())) return { date:"", time:"" };
+      const date = [fmt2(d.getMonth()+1), fmt2(d.getDate()), d.getFullYear()].join('/');
+      const time = fmt2(d.getHours()) + ':' + fmt2(d.getMinutes());
+      return { date, time };
     }
     function setStatus(m){ byId('status').textContent = m||""; }
     function impSetStatus(m){ byId('impStatus').textContent = m||""; }
@@ -325,6 +336,13 @@
       const hh = String(h).padStart(2,'0'), mmin = String(min).padStart(2,'0');
       return Y+"-"+mm+"-"+dd+"T"+hh+":"+mmin+":00";
     }
+    function combineDateTime(dateStr, timeStr){
+      const date = (dateStr||"").trim();
+      const time = (timeStr||"").trim();
+      if(!date && !time) return "";
+      if(date && time) return (date + " " + time).trim();
+      return (date || time).trim();
+    }
     function toIso(localStr){
       if(!localStr) return "";
       const s = String(localStr).trim();
@@ -353,6 +371,32 @@
       out.push(cur);
       return out.map(function(s){ return (s||'').trim(); });
     }
+    function parseMatchup(m){
+      if(!m) return null;
+      const txt = String(m).replace(/\s+/g,' ').trim();
+      const atSplit = txt.split(/\s*@\s*|\s+at\s+/i);
+      if(atSplit.length>=2){
+        const away = atSplit[0].trim();
+        const home = atSplit.slice(1).join(' @ ').trim();
+        if(home && away) return { home, away };
+      }
+      const vsSplit = txt.split(/\s+vs\.?\s+/i);
+      if(vsSplit.length>=2){
+        const home = vsSplit[0].trim();
+        const away = vsSplit.slice(1).join(' vs ').trim();
+        if(home && away) return { home, away };
+      }
+      return null;
+    }
+    function normalizeSide(val, home, away){
+      const v = (val||"").toLowerCase().trim();
+      if(!v) return "";
+      if(v==="home" || v==="h") return "home";
+      if(v==="away" || v==="a") return "away";
+      if(home && v===home.toLowerCase()) return "home";
+      if(away && v===away.toLowerCase()) return "away";
+      return v;
+    }
     async function parseCsvFile(file){
       if(!file){ alert("Pick a CSV file first or drop it into the box."); return null; }
       const raw = await file.text();
@@ -364,25 +408,63 @@
       if(lines.length < 2){ alert("CSV has no data rows. Ensure header + at least one row."); return null; }
       const delim = (lines[0].indexOf(';')>=0 && lines[0].indexOf(',')<0) ? ';' : ',';
       const headers = splitCsvLine(lines[0], delim).map(function(s){ return s.toLowerCase(); });
-      const expected = ["day","kickoff_local","home","away","winner"];
-      for(var i=0;i<expected.length;i++){ if((headers[i]||"")!==expected[i]){ alert("Expected first columns: day,kickoff_local,home,away,winner"); return null; } }
+      const idx = {
+        day: headers.indexOf("day"),
+        kickoff: headers.indexOf("kickoff_local"),
+        kickoffDate: headers.indexOf("kickoff_date"),
+        kickoffTime: headers.indexOf("kickoff_time"),
+        home: headers.indexOf("home"),
+        away: headers.indexOf("away"),
+        matchup: headers.indexOf("matchup"),
+        winner: headers.indexOf("winner"),
+        pick: headers.indexOf("pick")
+      };
+      if(idx.day === -1){ alert("Missing day column"); return null; }
+      const hasDateParts = idx.kickoffDate >=0 && idx.kickoffTime >=0;
+      if(idx.kickoff === -1 && !hasDateParts){ alert("Need kickoff_local or both kickoff_date and kickoff_time columns"); return null; }
+      if(idx.winner === -1){ alert("Missing winner column"); return null; }
+      const hasTeams = idx.home >=0 && idx.away >=0;
+      const hasMatchup = idx.matchup >=0;
+      const hasPick = idx.pick >=0;
+      if(!hasTeams && !hasMatchup){ alert("Need either home/away columns or a matchup column"); return null; }
+
       const games=[], rows=[];
       for(var li=1; li<lines.length; li++){
         const cols = splitCsvLine(lines[li], delim);
         if(cols.length===0) continue;
-        const day = cols[0], kickoffLocal = cols[1], home = cols[2], away = cols[3], winner = cols[4]||"";
+        const day = cols[idx.day];
+        const kickoffLocal = idx.kickoff >=0 ? cols[idx.kickoff] : combineDateTime(cols[idx.kickoffDate], cols[idx.kickoffTime]);
+        let kickoffDate = idx.kickoffDate >=0 ? cols[idx.kickoffDate] : "";
+        let kickoffTime = idx.kickoffTime >=0 ? cols[idx.kickoffTime] : "";
+        let home = hasTeams ? (cols[idx.home]||"") : "";
+        let away = hasTeams ? (cols[idx.away]||"") : "";
+        const matchup = hasMatchup ? (cols[idx.matchup]||"") : "";
+        const pickRaw = hasPick ? cols[idx.pick] : "";
+        const winner = cols[idx.winner]||"";
+        if(hasMatchup && (!home || !away)){
+          const parsed = parseMatchup(matchup);
+          if(parsed){ home = parsed.home; away = parsed.away; }
+        }
         if(!day && !home && !away) continue;
+        if(!home || !away){ alert("Missing home/away team on row " + (li+1)); return null; }
         const iso = toIso(kickoffLocal);
-        games.push({ day:day, home:home, away:away, winner:winner.toLowerCase(), kickoffIso: iso });
-        rows.push({ std:[day,kickoffLocal,home,away,winner] });
+        if(iso && (!kickoffDate || !kickoffTime)){
+          const parts = partsFromIso(iso);
+          if(!kickoffDate) kickoffDate = parts.date;
+          if(!kickoffTime) kickoffTime = parts.time;
+        }
+        const winnerNorm = normalizeSide(winner, home, away);
+        const pickNorm = normalizeSide(pickRaw, home, away);
+        games.push({ day:day, home:home, away:away, winner:winnerNorm, kickoffIso: iso, pick: pickNorm });
+        rows.push({ std:[day,kickoffDate,kickoffTime,kickoffLocal,home,away,matchup||"",winnerNorm,pickNorm] });
       }
-      return { headers:headers, games:games, rows:rows };
+      return { headers:headers, games:games, rows:rows, hasPick: hasPick };
     }
     function renderPreview(p){
-      byId('previewInfo').textContent = "Games: " + p.games.length;
+      byId('previewInfo').textContent = "Games: " + p.games.length + (p.hasPick ? " • picks included" : "");
       const tbl = byId('previewTable'); tbl.innerHTML="";
       const trh = document.createElement("tr");
-      ["day","kickoff_local","home","away","winner"].forEach(function(h){ const th=document.createElement("th"); th.textContent=h; trh.appendChild(th); });
+      ["day","kickoff_date","kickoff_time","kickoff_local","home","away","matchup","winner","pick"].forEach(function(h){ const th=document.createElement("th"); th.textContent=h; trh.appendChild(th); });
       tbl.appendChild(trh);
       p.rows.forEach(function(r){ const tr=document.createElement("tr"); r.std.forEach(function(v){ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); }); tbl.appendChild(tr); });
       byId('previewCard').style.display="block";
@@ -404,6 +486,8 @@
         const wid = weekId(season, wn);
         const replace = byId('impReplace').checked;
         const dry = byId('impDry').checked;
+        const pickUser = (byId('impPickUser').value||"").trim().toLowerCase();
+        const pickUid = pickUser ? uidFromEmail(pickUser) : null;
 
         impSetStatus("Importing…"); impLog("Import start for " + wid); impProg(1);
 
@@ -419,15 +503,27 @@
         }
         impProg(15);
 
+        let picksPayload = {};
         if(!dry){
           const bGames = db.batch();
           state.parsed.games.forEach(function(g){
             const ref = db.collection('games').doc();
             bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso });
+            if(pickUid && g.pick){ picksPayload[ref.id] = g.pick; }
           });
           await bGames.commit();
         }
         impLog("Wrote " + state.parsed.games.length + " game(s)");
+
+        if(!dry && pickUid && Object.keys(picksPayload).length){
+          await db.collection('picks').doc(pickUid).collection('weeks').doc(wid).set({
+            email: pickUser,
+            weekId: wid,
+            picks: picksPayload,
+            updatedAt: Date.now()
+          }, { merge:true });
+          impLog("Stored picks for " + pickUser + " (" + Object.keys(picksPayload).length + " games)");
+        }
         impProg(100);
         impSetStatus("✅ Import complete.");
         alert("Import complete!\\n\\nGames added: " + state.parsed.games.length + (dry ? "\\n\\n(DRY-RUN: no writes performed)" : ""));
@@ -437,7 +533,7 @@
       }
     }
     function generateTemplate(){
-      const csv = "day,kickoff_local,home,away,winner\n";
+      const csv = "day,kickoff_date,kickoff_time,home,away,matchup,winner,pick\n";
       const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href=url; a.download="week-template.csv"; document.body.appendChild(a); a.click();
