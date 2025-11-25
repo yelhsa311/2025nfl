@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NFL Picks — Admin Grid (v1.6)</title>
+<title>NFL Picks — Admin Grid (v1.7)</title>
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
@@ -37,7 +37,7 @@
   <div class="row" style="justify-content:space-between">
     <div class="row" style="align-items:center; gap:10px">
       <h1 style="margin:.2rem 0">Admin Grid</h1>
-      <span class="pill version-pill">v1.6</span>
+      <span class="pill version-pill">v1.7</span>
     </div>
     <div class="row">
       <a class="pill" href="index.html">← Back to App</a> <a href='./admin-import.html' class='import-link'>📥 Go to Importer</a>
@@ -128,6 +128,26 @@
       </span>
     </div>
 
+    <!-- Create user accounts without self-signup -->
+    <div class="card" style="margin-top:10px;">
+      <div class="row" style="gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div style="min-width:160px;">
+          <strong>Create user</strong>
+          <div class="muted">Pre-create login credentials for family</div>
+        </div>
+        <label>Username
+          <input id="newUsername" placeholder="Display name (optional)" />
+        </label>
+        <label>Email
+          <input id="newEmail" type="email" placeholder="user@example.com" />
+        </label>
+        <label>Password
+          <input id="newPass" type="password" placeholder="Min 6 characters" />
+        </label>
+        <button id="createUserBtn" class="primary">Create user</button>
+      </div>
+    </div>
+
     <div class="card" style="max-height:70vh;overflow:auto">
       <table id="grid">
         <thead id="thead"></thead>
@@ -140,8 +160,8 @@
 </div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
   import {
     getFirestore, collection, getDocs, getDoc, doc, setDoc, writeBatch,
     query, orderBy, addDoc, deleteDoc, collectionGroup, deleteField, where, documentId
@@ -240,6 +260,7 @@
     byId("allAwayBtn").onclick        = ()=> fillUserPicks("away", false);
     byId("clearUserBtn").onclick      = clearUserPicks;
     byId("saveUserBtn").onclick       = saveSelectedUser;
+    byId("createUserBtn").onclick     = createAccount;
 
     // init
     loadUsersPref();
@@ -264,6 +285,43 @@
       alert(e.message || String(e));
     }
   };
+
+  // --- Admin-created accounts (avoid signing the admin out) ---
+  let secondaryAuth = null;
+  function getSecondaryAuth(){
+    if (secondaryAuth) return secondaryAuth;
+    const secondaryApp = getApps().find(a => a.name === "__SECONDARY__") || initializeApp(firebaseConfig, "__SECONDARY__");
+    secondaryAuth = getAuth(secondaryApp);
+    return secondaryAuth;
+  }
+
+  async function createAccount(){
+    const email = byId("newEmail").value.trim();
+    const username = byId("newUsername").value.trim();
+    const pass = byId("newPass").value;
+
+    if (!email || !pass){
+      alert("Email and password are required.");
+      return;
+    }
+    setStatus("Creating user…");
+    try{
+      const auth2 = getSecondaryAuth();
+      const cred = await createUserWithEmailAndPassword(auth2, email, pass);
+      if (username){
+        await updateProfile(cred.user, { displayName: username });
+      }
+      log("Created user:", email, username ? `(username: ${username})` : "");
+      setStatus(`Created ${email} successfully`);
+      byId("newEmail").value = "";
+      byId("newUsername").value = "";
+      byId("newPass").value = "";
+    }catch(err){
+      console.error(err);
+      alert(err.message || err);
+      setStatus("User creation failed");
+    }
+  }
 
   // Users prefs
   function saveUsersPref(){
