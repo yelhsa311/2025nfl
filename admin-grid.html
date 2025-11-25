@@ -310,6 +310,31 @@
     }
   }
 
+  async function clearGamesForWeek(){
+    if(!confirm(`Delete ALL games for ${state.weekId}?\n\nThis will also prune related picks.`)) return;
+    try{
+      setStatus("Deleting all games for week…");
+      const snap = await getDocs(collection(db, "weeks", state.weekId, "games"));
+      if (snap.empty){ setStatus("No games to delete for this week."); return; }
+
+      const ids = snap.docs.map(d => d.id);
+      let batch = writeBatch(db), opCount = 0;
+      for (const d of snap.docs){
+        batch.delete(d.ref); opCount++;
+        if (opCount >= 450){ await batch.commit(); batch = writeBatch(db); opCount = 0; }
+      }
+      if (opCount > 0) await batch.commit();
+
+      await pruneGamesFromAllPicks(state.weekId, ids);
+      setStatus(`Deleted ${ids.length} game${ids.length===1?'':'s'} and pruned picks.`);
+      await loadWeek();
+    }catch(e){
+      console.error(e);
+      setStatus("Clear week error: " + (e.message||e));
+      alert("Clear week error: " + (e.message||e));
+    }
+  }
+
   // Add Game
   const toMs = (val) => {
     if (!val) return null; const ms = Date.parse(val); return Number.isFinite(ms) ? ms : null;
