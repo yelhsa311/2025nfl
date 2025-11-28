@@ -63,8 +63,8 @@
         <input id="inEmail" type="email" placeholder="email@example.com" />
         <input id="inPass" type="password" placeholder="password" />
         <div class="row">
-          <button id="btnSignIn"  class="primary" type="button" onclick="window._signin && window._signin()">Sign in</button>
-          <button id="btnCreate"  class="ghost"   type="button" onclick="window._create && window._create()">Create account</button>
+          <button id="btnSignIn"  class="primary" type="button">Sign in</button>
+          <button id="btnCreate"  class="ghost"   type="button">Create account</button>
         </div>
         <div id="authMsg" class="hint"></div>
       </div>
@@ -136,6 +136,9 @@
     const inEmail = document.getElementById('inEmail');
     const inPass  = document.getElementById('inPass');
     const btnReload = document.getElementById('btnReload');
+    const btnSignIn = document.getElementById('btnSignIn');
+    const btnCreate = document.getElementById('btnCreate');
+    const authMsg = document.getElementById('authMsg');
     const selWeek = document.getElementById('selWeek');
     const inSeason = document.getElementById('inSeason');
     const tblGamesBody = document.querySelector('#tblGames tbody');
@@ -150,75 +153,53 @@
     const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
     const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks');
 
-    // --- Replace your existing auth handlers with these ---
-async function doSignIn() {
-  const msgEl = document.getElementById('authMsg');
-  try {
-    await signInWithEmailAndPassword(auth, inEmail.value.trim(), inPass.value);
-    msgEl.textContent = 'Signed in.';
-  } catch (e) {
-    console.error(e);
-    msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
-  }
-}
+    function setAuthMessage(text){ authMsg.textContent = text || ''; }
 
-async function doCreate() {
-  const msgEl = document.getElementById('authMsg');
-  const email = inEmail.value.trim();
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, email, inPass.value);
-    await setDoc(doc(db,'users',cred.user.uid), {
-      displayName: email.split('@')[0],
-      createdAt: serverTimestamp()
-    }, { merge:true });
-    msgEl.textContent = 'Account created.';
-  } catch (e) {
-    console.error(e);
-    if (e.code === 'auth/email-already-in-use') {
-      msgEl.textContent = 'Account already exists — signing you in…';
-      // fallback: try sign-in with the same creds
+    async function doSignIn(evt){
+      evt?.preventDefault();
+      setAuthMessage('Signing in…');
       try {
-        await signInWithEmailAndPassword(auth, email, inPass.value);
-        msgEl.textContent = 'Signed in.';
-      } catch (e2) {
-        console.error(e2);
-        msgEl.textContent = `${e2.code || 'error'}: ${e2.message || e2}`;
+        await signInWithEmailAndPassword(auth, inEmail.value.trim(), inPass.value);
+        setAuthMessage('Signed in.');
+      } catch (e) {
+        console.error(e);
+        setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
       }
-    } else {
-      msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
     }
-  }
-}
 
-// Bind both programmatically and via inline as a belt-and-suspenders approach
-window._signin = doSignIn;
-window._create = doCreate;
-document.getElementById('btnSignIn')?.addEventListener('click', doSignIn);
-document.getElementById('btnCreate')?.addEventListener('click', doCreate);
-
-    
-    // ---- Expose bulletproof auth handlers (so clicks always work)
-    window._signin = async () => {
-      const msgEl = document.getElementById('authMsg');
+    async function doCreate(evt){
+      evt?.preventDefault();
+      const email = inEmail.value.trim();
+      setAuthMessage('Creating account…');
       try {
-        await signInWithEmailAndPassword(auth, inEmail.value, inPass.value);
-        msgEl.textContent = 'Signed in.';
+        const cred = await createUserWithEmailAndPassword(auth, email, inPass.value);
+        await setDoc(doc(db,'users',cred.user.uid), {
+          displayName: email.split('@')[0],
+          createdAt: serverTimestamp()
+        }, { merge:true });
+        setAuthMessage('Account created.');
       } catch (e) {
         console.error(e);
-        msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
+        if (e.code === 'auth/email-already-in-use') {
+          setAuthMessage('Account already exists — signing you in…');
+          try {
+            await signInWithEmailAndPassword(auth, email, inPass.value);
+            setAuthMessage('Signed in.');
+          } catch (e2) {
+            console.error(e2);
+            setAuthMessage(`${e2.code || 'error'}: ${e2.message || e2}`);
+          }
+        } else {
+          setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+        }
       }
-    };
-    window._create = async () => {
-      const msgEl = document.getElementById('authMsg');
-      try {
-        const cred = await createUserWithEmailAndPassword(auth, inEmail.value, inPass.value);
-        await setDoc(doc(db,'users',cred.user.uid), { displayName: inEmail.value.split('@')[0], createdAt: ts() }, { merge:true });
-        msgEl.textContent = 'Account created.';
-      } catch (e) {
-        console.error(e);
-        msgEl.textContent = `${e.code || 'error'}: ${e.message || e}`;
-      }
-    };
+    }
+
+    // Wire up buttons and expose globals so inline handlers continue to work
+    btnSignIn.addEventListener('click', doSignIn);
+    btnCreate.addEventListener('click', doCreate);
+    window._signin = doSignIn;
+    window._create = doCreate;
 
     // ---- Auth state
     let unsubGames = null;
