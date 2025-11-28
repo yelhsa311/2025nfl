@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Everyone's Picks (v1.0)</title>
+  <style>
+    :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--good:#86f5b2;--bad:#ff8c8c;--info:#c7b6ff;}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+    a{color:#aeb3ff;text-decoration:none}
+    .wrap{max-width:1200px;margin:0 auto;padding:16px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    h1{margin:0}
+    .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
+    .version-pill{background:#0d1428;color:#9cc7ff;border-color:#2d3a55;font-size:12px;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    input,select,button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:10px;border-radius:10px}
+    button.primary{outline:2px solid var(--accent)}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid var(--border);padding:10px;text-align:left;vertical-align:top}
+    th{background:#12151c}
+    tbody tr:hover{background:#131722}
+    .muted{color:var(--muted)}
+    .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:10px;background:#0f1424}
+    .chip.win{border-color:#1b7a51;background:#10241c;color:#9af7c8}
+    .chip.lose{border-color:#943131;background:#241012;color:#ffb3b3}
+    .chip.pending{border-color:#423d63;background:#141426;color:#c7b6ff}
+    .note{font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="row" style="align-items:center; gap:8px">
+        <h1 style="margin:0">Everyone's Picks</h1>
+        <span class="pill version-pill">v1.0</span>
+      </div>
+      <div class="row">
+        <a class="pill" href="index.html">← Back to App</a>
+        <span id="userTag" class="pill" style="display:none"></span>
+        <button id="signOutBtn" style="display:none">Sign out</button>
+      </div>
+    </header>
+
+    <div id="auth" class="card">
+      <div class="row">
+        <input id="email" type="email" placeholder="Email" />
+        <input id="pass" type="password" placeholder="Password" />
+        <button id="signInBtn" class="primary">Sign in</button>
+      </div>
+      <div class="muted" style="margin-top:6px">Sign in to see this week's picks.</div>
+    </div>
+
+    <div id="app" class="card" style="display:none">
+      <div class="row">
+        <label>Week:
+          <select id="weekSelect"></select>
+        </label>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <div class="note" id="status"></div>
+      <div id="tableWrap"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      getFirestore, collection, collectionGroup, documentId, getDocs, orderBy, query, where
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
+      authDomain: "nfl-picks-b83c2.firebaseapp.com",
+      projectId: "nfl-picks-b83c2",
+      storageBucket: "nfl-picks-b83c2.appspot.com",
+      messagingSenderId: "802058909501",
+      appId: "1:802058909501:web:bb935c188891934de07754",
+      measurementId: "G-MSJHYZ4VG2"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    await setPersistence(auth, browserLocalPersistence);
+
+    const state = {
+      weekId: "2025-Week-01",
+      games: [],
+      picks: [] // { email, picks }
+    };
+
+    const el = (s) => document.querySelector(s);
+
+    el("#signInBtn").onclick = async () => {
+      const email = el("#email").value.trim();
+      const pass = el("#pass").value;
+      if (!email || !pass) { alert("Enter email and password."); return; }
+      try{ await signInWithEmailAndPassword(auth, email, pass); }
+      catch(e){ alert(e.message || e); }
+    };
+
+    el("#signOutBtn").onclick = async () => { try{ await signOut(auth); } finally{ location.reload(); } };
+    el("#refreshBtn").onclick = () => loadWeek();
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user){
+        el("#auth").style.display = "block";
+        el("#app").style.display = "none";
+        el("#userTag").style.display = "none";
+        el("#signOutBtn").style.display = "none";
+        return;
+      }
+      el("#auth").style.display = "none";
+      el("#app").style.display = "block";
+      el("#userTag").style.display = "inline-flex";
+      el("#userTag").textContent = user.email;
+      el("#signOutBtn").style.display = "inline-flex";
+      await setupWeeks();
+      await loadWeek();
+    });
+
+    function setupWeeks(){
+      const sel = el("#weekSelect"); sel.innerHTML = "";
+      for (let i=1;i<=18;i++){
+        const id = `2025-Week-${String(i).padStart(2,"0")}`;
+        const o = document.createElement("option");
+        o.value = id; o.textContent = `Week ${i}`;
+        sel.appendChild(o);
+      }
+      const remembered = localStorage.getItem("everyoneWeekId");
+      if (remembered) state.weekId = remembered;
+      sel.value = state.weekId;
+      sel.onchange = () => {
+        state.weekId = sel.value;
+        localStorage.setItem("everyoneWeekId", state.weekId);
+        loadWeek();
+      };
+    }
+
+    async function loadWeek(){
+      setStatus("Loading…");
+      await Promise.all([loadGames(), loadPicks()]);
+      renderTable();
+      setStatus(state.games.length ? "" : "No games found for this week.");
+    }
+
+    async function loadGames(){
+      state.games = [];
+      try{
+        const q = query(collection(db, "weeks", state.weekId, "games"), orderBy("kickoffTs", "asc"));
+        const snap = await getDocs(q);
+        snap.forEach(d => {
+          const v = d.data();
+          state.games.push({
+            id: d.id,
+            day: v.day || "",
+            home: v.home || "",
+            away: v.away || "",
+            kickoffTs: typeof v.kickoffTs === "number" ? v.kickoffTs : null,
+            winner: v.winner || ""
+          });
+        });
+      }catch(e){ setStatus("Game load error: " + (e.message||e)); }
+    }
+
+    async function loadPicks(){
+      state.picks = [];
+      try{
+        let snap = await getDocs(query(collectionGroup(db, "weeks"), where("weekId", "==", state.weekId)));
+        if (snap.empty){
+          snap = await getDocs(query(collectionGroup(db, "weeks"), where(documentId(), "==", state.weekId)));
+        }
+        snap.forEach(d => {
+          const data = d.data() || {};
+          const email = (data.email || "").trim() || d.ref.path.split("/")[1] || "";
+          state.picks.push({ email, picks: data.picks || {} });
+        });
+        state.picks.sort((a,b)=>a.email.localeCompare(b.email));
+      }catch(e){ setStatus("Pick load error: " + (e.message||e)); }
+    }
+
+    function renderTable(){
+      const wrap = el("#tableWrap");
+      if (!state.games.length){ wrap.innerHTML = ""; return; }
+
+      const headerCells = ["<th style='min-width:200px'>User</th>"];
+      state.games.forEach((g, idx) => {
+        const label = `${idx+1}. ${g.away} @ ${g.home}`;
+        const win = g.winner ? `<div class='note'>Winner: ${g[g.winner] || g.winner}</div>` : "";
+        headerCells.push(`<th style="min-width:160px">${label}${win}</th>`);
+      });
+
+      const rows = state.picks.map(({ email, picks }) => {
+        const cells = [`<td>${email || "(unknown)"}</td>`];
+        for (const g of state.games){
+          const choice = picks[g.id];
+          const label = choice === "home" ? g.home : choice === "away" ? g.away : "—";
+          const hasWinner = !!g.winner;
+          const status = !choice ? "pending" : hasWinner ? (g.winner === choice ? "win" : "lose") : "pending";
+          const chipLabel = !choice ? "No pick" : label;
+          cells.push(`<td><span class="chip ${status}">${statusIcon(status)} ${chipLabel}</span></td>`);
+        }
+        return `<tr>${cells.join("")}</tr>`;
+      });
+
+      if (!rows.length){
+        wrap.innerHTML = `<div class="muted">No picks submitted for this week yet.</div>`;
+        return;
+      }
+
+      wrap.innerHTML = `
+        <table>
+          <thead><tr>${headerCells.join("")}</tr></thead>
+          <tbody>${rows.join("")}</tbody>
+        </table>
+      `;
+    }
+
+    function statusIcon(status){
+      if (status === "win") return "✅";
+      if (status === "lose") return "❌";
+      return "⏳";
+    }
+
+    function setStatus(msg){ el("#status").textContent = msg || ""; }
+  </script>
+</body>
+</html>
