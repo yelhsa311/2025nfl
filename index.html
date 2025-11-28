@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v1.7)</title>
+<title>Family NFL Picks (v1.8)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v1.7</span>
+      <span class="pill version-pill">v1.8</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -289,6 +289,7 @@
 
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
   let autoLockApplied = false;
+  let pendingLock = null;
 
   function getEarliestKickoffMs(games){
     let min = null;
@@ -321,6 +322,7 @@
       e.target.checked = state.lock;
       return;
     }
+    pendingLock = checked;
     try {
       // Persist using all known legacy keys so other admin tools stay in sync
       await setDoc(currentLockRef, {
@@ -336,6 +338,7 @@
       renderGames();
     } catch (err) {
       console.error("finalize toggle", err);
+      pendingLock = null;
       e.target.checked = state.lock;
     }
   });
@@ -429,7 +432,15 @@
       else if (autoLocked) label = "Locked (kickoff)";
       el("#lockBadge").textContent = label;
       el("#lockBadge").className   = "lock " + ((state.lock || autoLocked) ? "danger" : "muted");
-      el("#adminWeekLock").checked = state.lock;
+      const lockBox = el("#adminWeekLock");
+      if (lockBox){
+        if (pendingLock !== null && pendingLock !== state.lock){
+          lockBox.checked = pendingLock;
+        } else {
+          pendingLock = null;
+          lockBox.checked = state.lock;
+        }
+      }
       renderGames();
 
       // Live countdown timer
