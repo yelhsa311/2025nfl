@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v1.5</span>
+      <span class="pill version-pill">v1.6</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -314,6 +314,25 @@
     return state.lock || autoLock;
   }
 
+  // Admin toggle for finalize/lock
+  el("#adminWeekLock")?.addEventListener("change", async (e) => {
+    const checked = e.target.checked;
+    if (!state.isAdmin || !currentLockRef){
+      e.target.checked = state.lock;
+      return;
+    }
+    try {
+      await setDoc(currentLockRef, { locked: checked, finalized: checked }, { merge:true });
+      state.lock = checked;
+      el("#lockBadge").textContent = checked ? "Finalized" : "Open";
+      el("#lockBadge").className   = "lock " + (checked ? "danger" : "muted");
+      renderGames();
+    } catch (err) {
+      console.error("finalize toggle", err);
+      e.target.checked = state.lock;
+    }
+  });
+
   // --- Auth UI ---
   el("#signInBtn").onclick = async () => {
     const email = el("#email").value.trim();
@@ -376,6 +395,7 @@
   }
 
   let unsubGames=null, unsubLock=null, unsubMyPicks=null;
+  let currentLockRef = null;
 
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
@@ -383,6 +403,7 @@
 
     // Lock meta
     const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
+    currentLockRef = lockRef;
     unsubLock = onSnapshot(lockRef, s => {
       const d = s.exists() ? s.data() : {};
       const metaLock = d.locked ?? d.finalized ?? d.final ?? d.isFinal ?? d.lock;
@@ -425,10 +446,6 @@
       tick();
       window.__lockTicker = setInterval(tick, 1000);
     }, e => console.error("lock listener", e));
-    el("#adminWeekLock").onchange = async (e) => {
-      if (!state.isAdmin) return;
-      await setDoc(lockRef, { locked: e.target.checked, finalized: e.target.checked }, { merge:true });
-    };
 
     // Games (ordered by createdAt; UI sorts by kickoffTs)
     const gamesCol = collection(db, "weeks", state.weekId, "games");
