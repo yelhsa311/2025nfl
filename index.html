@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family NFL Picks (v2.7)</title>
+  <title>Family NFL Picks (v2.8)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Family NFL Picks</h1>
-        <span class="pill version-pill">v2.7</span>
+        <span class="pill version-pill">v2.8</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -287,6 +287,7 @@
 
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
   let autoLockApplied = false;
+  let lockSaveInFlight = false;
   let lockRefs = { primary:null, legacy:null };
   let currentLockRef = null;
 
@@ -349,36 +350,29 @@
 
     if (!refs.length) throw new Error("No lock document reference available");
 
+    lockSaveInFlight = true;
     let lastErr = null;
-    for (const ref of refs){
-      if (tried.has(ref.path)) continue;
-      tried.add(ref.path);
-      try {
-        await setDoc(ref, payload, { merge:true });
-        currentLockRef = ref;
-        return ref;
-      } catch (err) {
-        console.warn("lock write failed for", ref.path, err);
-        lastErr = err;
+
+    // Try up to three times with a short backoff to dodge transient errors.
+    for (let attempt = 0; attempt < 3; attempt++){
+      for (const ref of refs){
+        const key = `${attempt}-${ref.path}`;
+        if (tried.has(key)) continue;
+        tried.add(key);
+        try {
+          await setDoc(ref, payload, { merge:true });
+          currentLockRef = ref;
+          lockSaveInFlight = false;
+          return ref;
+        } catch (err) {
+          console.warn(`lock write (attempt ${attempt+1}) failed for`, ref.path, err);
+          lastErr = err;
+        }
       }
+      await new Promise(res => setTimeout(res, 200 + attempt * 150));
     }
 
-    // Retry once after a short delay in case the initial attempt failed due to
-    // a transient network or listener race condition.
-    await new Promise(res => setTimeout(res, 200));
-    for (const ref of refs){
-      if (tried.has(`retry-${ref.path}`)) continue;
-      tried.add(`retry-${ref.path}`);
-      try {
-        await setDoc(ref, payload, { merge:true });
-        currentLockRef = ref;
-        return ref;
-      } catch (err) {
-        console.warn("lock retry failed for", ref.path, err);
-        lastErr = err;
-      }
-    }
-
+    lockSaveInFlight = false;
     throw lastErr || new Error("Unable to persist lock state");
   }
 
@@ -387,6 +381,10 @@
     if (!state.isAdmin){
       return;
     }
+
+    const finalizeBtn = el("#finalizeBtn");
+    finalizeBtn.disabled = true;
+    const prevLock = state.lock;
 
     const promptMsg = state.lock
       ? "Unlock this week so users can keep making changes until it auto-locks 30 minutes before kickoff?"
@@ -421,7 +419,12 @@
       toast(state.lock ? "Week finalized. Picks are locked." : "Week unlocked.");
     } catch (err) {
       console.error("finalize toggle", err);
+      state.lock = prevLock;
+      updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
       alert("Unable to save the lock state. Please try again.");
+    } finally {
+      finalizeBtn.disabled = false;
+      lockSaveInFlight = false;
     }
   });
 
@@ -499,6 +502,11 @@
     currentLockRef = lockRefs.primary;
 
     const handleLockSnapshot = (snap, source) => {
+      if (lockSaveInFlight && snap.metadata?.fromCache){
+        // Ignore cached reads while a save is in flight to avoid UI flicker.
+        return;
+      }
+
       const d = snap.exists() ? snap.data() : {};
       const metaLock = [d.locked, d.finalized, d.final, d.isFinal, d.lock].some(v => v === true);
       const lockAtMs = d.lockAt?.seconds ? (d.lockAt.seconds * 1000) : (typeof d.lockAt === "number" ? d.lockAt : null);
