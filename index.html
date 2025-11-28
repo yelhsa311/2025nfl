@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v1.2)</title>
+<title>Family NFL Picks (v1.3)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v1.2</span>
+      <span class="pill version-pill">v1.3</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -651,12 +651,14 @@
       const picksSnap = await getDocs(collectionGroup(db, "weeks"));
 
       // Aggregate by email (dedupe)
-      const rowsByEmail = new Map(); // emailLower -> { email, wins, played }
+      const rowsByEmail = new Map(); // emailLower -> { email, wins, played, uid, name }
       picksSnap.forEach(docSnap => {
         const data = docSnap.data();
         if (data.weekId !== state.weekId) return;
         const email = (data.email || "").trim();
         if (!email) return;
+        const uid = docSnap.ref.path.split("/")[1];
+        const name = data.userName || data.name || data.displayName;
 
         const picks = data.picks || {};
         let wins = 0, played = 0;
@@ -671,20 +673,37 @@
         const key = email.toLowerCase();
         const curr = rowsByEmail.get(key);
         if (!curr) {
-          rowsByEmail.set(key, { email, wins, played });
+          rowsByEmail.set(key, { email, wins, played, uid, name });
         } else {
           curr.wins += wins;
           curr.played += played;
+          if (!curr.uid) curr.uid = uid;
+          if (!curr.name && name) curr.name = name;
         }
       });
 
       const rows = Array.from(rowsByEmail.values());
+      await enrichStandingsNames(rows);
       rows.sort((a,b) => b.wins - a.wins || a.email.localeCompare(b.email));
       renderStandingsTable(rows, totalGames);
     }catch(e){
       console.error("standings error", e);
       el("#standingsBody").innerHTML = `<div class="muted">Unable to compute standings (${e.message}).</div>`;
     }
+  }
+
+  async function enrichStandingsNames(rows){
+    const missing = rows.filter(r => !r.name && r.uid).map(r => r.uid);
+    await Promise.all(missing.map(async uid => {
+      try {
+        const snap = await getDoc(doc(db, "publicUsers", uid));
+        if (snap.exists()){
+          const target = rows.find(r => r.uid === uid);
+          const data = snap.data() || {};
+          target.name = data.displayName || data.name || data.userName || target.email;
+        }
+      } catch {}
+    }));
   }
 
   function renderStandingsTable(rows, totalGames){
@@ -726,7 +745,7 @@
       html.push(
         `<tr class="${rowClasses}">
           <td>${i+1}</td>
-          <td>${r.email}${chips}</td>
+          <td>${(r.name || r.email)}${chips}</td>
           <td>${r.wins}</td>
           <td>${r.played}/${totalGames}</td>
           <td>${pct(r.wins, r.played)}</td>

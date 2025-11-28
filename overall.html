@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>NFL Picks — Overall Standings (v1.0)</title>
+  <title>NFL Picks — Overall Standings (v1.1)</title>
   <style>
     :root { --bg:#0b1220; --fg:#e6edf3; --card:#0f172a; --line:#1f2937; --accent:#1f6feb; }
     html,body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
@@ -31,7 +31,7 @@
     <header>
       <div class="row" style="align-items:center; gap:10px">
         <h1>Overall Standings</h1>
-        <span class="version">v1.0</span>
+        <span class="version">v1.1</span>
       </div>
       <a class="button" href="./index.html">← Back to Weeks</a>
     </header>
@@ -90,10 +90,12 @@
     const weekListeners = new Map();
   
     function setUserWeek(uid, weekId, data){
+      const email = (data?.email || "").trim();
       userWeeks.set(`${uid}|${weekId}`, {
         uid, weekId,
         picks: (data?.picks && typeof data.picks === 'object') ? data.picks : {},
-        name:  data?.userName || data?.name || data?.displayName
+        name:  data?.userName || data?.name || data?.displayName,
+        email
       });
     }
   
@@ -141,7 +143,7 @@
     }
   
     async function enrichNames(rows){
-      const missing = rows.filter(r => !r.name).map(r => r.uid);
+      const missing = rows.filter(r => !r.name && r.uid).map(r => r.uid);
       await Promise.all(missing.map(async uid=>{
         try {
           const s = await getDoc(doc(db, "publicUsers", uid));
@@ -151,11 +153,16 @@
     }
   
     function computeTotals(){
-      const perUser = new Map(); // uid -> { uid, name, wins, losses }
-      for (const { uid, weekId, picks, name } of userWeeks.values()){
+      const perUser = new Map(); // key -> { uid, name, email, wins, losses }
+      for (const { uid, weekId, picks, name, email } of userWeeks.values()){
         const winners = winnersByWeek.get(weekId) || {};
-        const row = perUser.get(uid) || { uid, name, wins: 0, losses: 0 };
-  
+        const key = email ? lc(email) : uid;
+        const row = perUser.get(key) || { key, uid, name, email, wins: 0, losses: 0 };
+
+        if (!row.name && name) row.name = name;
+        if (!row.email && email) row.email = email;
+        if (!row.uid && uid) row.uid = uid;
+
         for (const [gameId, pickVal] of Object.entries(picks)){
           const game = winners[gameId];                 // { winner, home, away }
           if (!game) continue;                          // no winner yet or wrong id
@@ -164,7 +171,7 @@
           if (side === game.winner) row.wins++;
           else                      row.losses++;
         }
-        perUser.set(uid, row);
+        perUser.set(key, row);
       }
       return Array.from(perUser.values());
     }
@@ -179,7 +186,7 @@
           ? rows.map((r,i)=>`
              <tr>
                <td>${i+1}</td>
-               <td>${esc(r.name ?? r.uid)}</td>
+               <td>${esc(r.name ?? r.email ?? r.uid)}</td>
                <td class="num">${r.wins}</td>
                <td class="num">${r.losses}</td>
              </tr>`).join("")
