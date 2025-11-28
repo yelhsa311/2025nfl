@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v2.5)</title>
+  <title>Family NFL Picks (v2.6)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -149,8 +149,8 @@
 <div class="wrap">
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
-      <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v2.5</span>
+        <h1 style="margin:0">Family NFL Picks</h1>
+        <span class="pill version-pill">v2.6</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -290,6 +290,17 @@
   let lockRefs = { primary:null, legacy:null };
   let currentLockRef = null;
 
+  function ensureLockRefs(){
+    if (!state.weekId) throw new Error("No week selected");
+
+    lockRefs = {
+      primary: doc(db, "weeks", state.weekId),
+      legacy: doc(db, "weeks", state.weekId, "meta", "lock")
+    };
+
+    return lockRefs;
+  }
+
   function getEarliestKickoffMs(games){
     let min = null;
     for (const g of games || []){
@@ -332,19 +343,14 @@
   }
 
   async function persistLock(payload){
-    const refs = [lockRefs.primary, lockRefs.legacy].filter(Boolean);
-
-    if (!refs.length){
-      // Reconstruct references if the week subscription hasn't finished yet
-      lockRefs = {
-        primary: doc(db, "weeks", state.weekId),
-        legacy: doc(db, "weeks", state.weekId, "meta", "lock")
-      };
-      refs.push(lockRefs.primary, lockRefs.legacy);
-    }
+    const rebuilt = ensureLockRefs();
+    const refs = [currentLockRef, rebuilt.primary, rebuilt.legacy].filter(Boolean);
+    const tried = new Set();
     let lastErr = null;
 
     for (const ref of refs){
+      if (tried.has(ref.path)) continue;
+      tried.add(ref.path);
       try {
         await setDoc(ref, payload, { merge:true });
         currentLockRef = ref;
@@ -378,28 +384,28 @@
       isFinal: desiredLock
     };
 
+    try {
+      const lockRef = await persistLock(lockPayload);
+
+      // Optimistically update the UI even if the verification read fails
+      let persistedLock = desiredLock;
       try {
-        const lockRef = await persistLock(lockPayload);
-
-        // Optimistically update the UI even if the verification read fails
-        let persistedLock = desiredLock;
-        try {
-          const snap = await getDoc(lockRef);
-          const saved = snap.exists() ? snap.data() : lockPayload;
-          persistedLock = [saved.locked, saved.finalized, saved.final, saved.isFinal, saved.lock].some(v => v === true) || desiredLock;
-        } catch (verifyErr) {
-          console.warn("lock verification", verifyErr);
-        }
-
-        state.lock = persistedLock;
-        updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
-        renderGames();
-        toast(state.lock ? "Week finalized. Picks are locked." : "Week unlocked.");
-      } catch (err) {
-        console.error("finalize toggle", err);
-        alert("Unable to save the lock state. Please try again.");
+        const snap = await getDoc(lockRef);
+        const saved = snap.exists() ? snap.data() : lockPayload;
+        persistedLock = [saved.locked, saved.finalized, saved.final, saved.isFinal, saved.lock].some(v => v === true) || desiredLock;
+      } catch (verifyErr) {
+        console.warn("lock verification", verifyErr);
       }
-    });
+
+      state.lock = persistedLock;
+      updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
+      renderGames();
+      toast(state.lock ? "Week finalized. Picks are locked." : "Week unlocked.");
+    } catch (err) {
+      console.error("finalize toggle", err);
+      alert("Unable to save the lock state. Please try again.");
+    }
+  });
 
   // --- Auth UI ---
   el("#signInBtn").onclick = async () => {
