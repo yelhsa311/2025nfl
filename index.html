@@ -537,13 +537,14 @@
       const d = snap.exists() ? snap.data() : {};
       const metaLock = [d.locked, d.finalized, d.final, d.isFinal, d.lock].some(v => v === true);
       const lockAtMs = d.lockAt?.seconds ? (d.lockAt.seconds * 1000) : (typeof d.lockAt === "number" ? d.lockAt : null);
+      const hasLockData = metaLock || lockAtMs != null || ["lockedAt", "lockedBy", "autoLockedAt"].some(k => k in d);
 
-      if (source === "primary" && Object.keys(d).length){
-        currentLockRef = lockRefs.primary;
+      if (source === "primary"){
         state.__primaryLockSeen = true;
-      } else if (source === "legacy" && state.__primaryLockSeen) {
-        return; // prefer primary data when available
+        state.__primaryLockHasData = hasLockData;
+        if (hasLockData) currentLockRef = lockRefs.primary;
       } else if (source === "legacy") {
+        if (state.__primaryLockHasData) return; // prefer primary when it has lock fields
         currentLockRef = lockRefs.legacy;
       }
 
@@ -584,6 +585,7 @@
     };
 
     state.__primaryLockSeen = false;
+    state.__primaryLockHasData = false;
     const unsubPrimary = onSnapshot(lockRefs.primary, snap => handleLockSnapshot(snap, "primary"), e => console.error("lock listener", e));
     const unsubLegacy = onSnapshot(lockRefs.legacy, snap => handleLockSnapshot(snap, "legacy"), e => console.error("legacy lock listener", e));
     unsubLock = () => { unsubPrimary?.(); unsubLegacy?.(); };
