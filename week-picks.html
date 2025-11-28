@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Everyone's Picks (v1.3)</title>
+  <title>Everyone's Picks (v1.4)</title>
   <style>
     :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--good:#86f5b2;--bad:#ff8c8c;--info:#c7b6ff;}
     *{box-sizing:border-box}
@@ -37,7 +37,7 @@
     <header>
       <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Everyone's Picks</h1>
-        <span class="pill version-pill">v1.3</span>
+        <span class="pill version-pill">v1.4</span>
       </div>
       <div class="row">
         <a class="pill" href="index.html">← Back to App</a>
@@ -75,7 +75,9 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
-      getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+      setPersistence, browserLocalPersistence, browserSessionPersistence,
+      createUserWithEmailAndPassword
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
       getFirestore, collection, getDocs, orderBy, query, doc, getDoc, setDoc, serverTimestamp
@@ -98,10 +100,22 @@
     const el = (s) => document.querySelector(s);
     const authMsg = el("#authMsg");
 
-    setPersistence(auth, browserLocalPersistence).catch((e) => {
-      console.error(e);
-      authMsg.textContent = `Using session storage due to auth settings: ${e.message || e}`;
-    });
+    async function setupPersistence(){
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (e) {
+        console.error(e);
+        authMsg.textContent = `Using session storage due to auth settings: ${e.message || e}`;
+        try {
+          await setPersistence(auth, browserSessionPersistence);
+        } catch (fallbackError) {
+          console.error(fallbackError);
+          authMsg.textContent += ` (Session fallback also unavailable: ${fallbackError.message || fallbackError})`;
+        }
+      }
+    }
+
+    setupPersistence();
 
     const state = {
       season: String(new Date().getFullYear()),
