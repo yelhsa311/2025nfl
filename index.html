@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v2.2)</title>
+<title>Family NFL Picks (v2.3)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v2.2</span>
+      <span class="pill version-pill">v2.3</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -287,6 +287,8 @@
 
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
   let autoLockApplied = false;
+  let lockRefs = { primary:null, legacy:null };
+  let currentLockRef = null;
 
   function getEarliestKickoffMs(games){
     let min = null;
@@ -329,16 +331,30 @@
     }
   }
 
+  async function persistLock(payload){
+    const refs = [lockRefs.primary, lockRefs.legacy].filter(Boolean);
+    let lastErr = null;
+
+    for (const ref of refs){
+      try {
+        await setDoc(ref, payload, { merge:true });
+        currentLockRef = ref;
+        return ref;
+      } catch (err) {
+        console.warn("lock write failed for", ref.path, err);
+        lastErr = err;
+      }
+    }
+
+    throw lastErr || new Error("Unable to persist lock state");
+  }
+
   // Admin finalize button with confirmation
   el("#finalizeBtn")?.addEventListener("click", async () => {
     if (!state.isAdmin){
       return;
     }
 
-    // Guard against rare cases where the lock listener hasn't initialized yet
-    // (e.g., clicking immediately after sign-in). Build the ref on-demand.
-    const lockRef = currentLockRef || doc(db, "weeks", state.weekId, "meta", "lock");
-    currentLockRef = lockRef;
     const promptMsg = state.lock
       ? "Unlock this week so users can keep making changes until it auto-locks 30 minutes before kickoff?"
       : "Finalize this week and lock all picks?";
@@ -354,7 +370,7 @@
     };
 
     try {
-      await setDoc(lockRef, lockPayload, { merge:true });
+      const lockRef = await persistLock(lockPayload);
 
       // Verify the lock saved so the UI stays in sync even if the listener is delayed
       const snap = await getDoc(lockRef);
@@ -433,31 +449,45 @@
   }
 
   let unsubGames=null, unsubLock=null, unsubMyPicks=null;
-  let currentLockRef = null;
 
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
     autoLockApplied = false;
 
-    // Lock meta
-    const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
-    currentLockRef = lockRef;
-    unsubLock = onSnapshot(lockRef, s => {
-      const d = s.exists() ? s.data() : {};
+    lockRefs = {
+      primary: doc(db, "weeks", state.weekId),
+      legacy: doc(db, "weeks", state.weekId, "meta", "lock")
+    };
+    currentLockRef = lockRefs.primary;
+
+    const handleLockSnapshot = (snap, source) => {
+      const d = snap.exists() ? snap.data() : {};
       const metaLock = [d.locked, d.finalized, d.final, d.isFinal, d.lock].some(v => v === true);
-      state.lockAt = (d.lockAt && d.lockAt.seconds) ? (d.lockAt.seconds * 1000) : null;
-      // Badge text
+      const lockAtMs = d.lockAt?.seconds ? (d.lockAt.seconds * 1000) : (typeof d.lockAt === "number" ? d.lockAt : null);
+
+      if (source === "primary" && Object.keys(d).length){
+        currentLockRef = lockRefs.primary;
+        state.__primaryLockSeen = true;
+      } else if (source === "legacy" && state.__primaryLockSeen) {
+        return; // prefer primary data when available
+      } else if (source === "legacy") {
+        currentLockRef = lockRefs.legacy;
+      }
+
+      state.lockAt = lockAtMs;
+
       const now = Date.now();
       const autoLocked = state.lockAt ? now >= state.lockAt : false;
       state.lock = !!(metaLock || autoLocked);
+
       if (autoLocked && !state.lock && !autoLockApplied){
         autoLockApplied = true;
-        setDoc(lockRef, { locked: true }, { merge:true }).catch(console.error);
+        persistLock({ locked: true }).catch(console.error);
       }
+
       updateLockUi(autoLocked);
       renderGames();
 
-      // Live countdown timer
       clearInterval(window.__lockTicker);
       if (state.lock || !state.lockAt) return;
       function tick(){
@@ -477,7 +507,12 @@
       }
       tick();
       window.__lockTicker = setInterval(tick, 1000);
-    }, e => console.error("lock listener", e));
+    };
+
+    state.__primaryLockSeen = false;
+    const unsubPrimary = onSnapshot(lockRefs.primary, snap => handleLockSnapshot(snap, "primary"), e => console.error("lock listener", e));
+    const unsubLegacy = onSnapshot(lockRefs.legacy, snap => handleLockSnapshot(snap, "legacy"), e => console.error("legacy lock listener", e));
+    unsubLock = () => { unsubPrimary?.(); unsubLegacy?.(); };
 
     // Games (ordered by createdAt; UI sorts by kickoffTs)
     const gamesCol = collection(db, "weeks", state.weekId, "games");
@@ -492,7 +527,7 @@
       const currentLockAtMs = state.lockAt;
       if (desiredLockAtMs !== currentLockAtMs){
         const lockAtPayload = desiredLockAtMs ? { lockAt: Timestamp.fromMillis(desiredLockAtMs) } : { lockAt: null };
-        setDoc(lockRef, lockAtPayload, { merge:true }).catch(console.error);
+        persistLock(lockAtPayload).catch(console.error);
       }
     }, e => console.error("games listener", e));
 
