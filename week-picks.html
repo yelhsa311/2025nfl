@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Everyone's Picks (v1.1)</title>
+  <title>Everyone's Picks (v1.2)</title>
   <style>
     :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--good:#86f5b2;--bad:#ff8c8c;--info:#c7b6ff;}
     *{box-sizing:border-box}
@@ -28,6 +28,8 @@
     .chip.lose{border-color:#943131;background:#241012;color:#ffb3b3}
     .chip.pending{border-color:#423d63;background:#141426;color:#c7b6ff}
     .note{font-size:12px;color:var(--muted)}
+    .msg{color:#c7b6ff;font-size:13px;margin-top:6px}
+    .error{color:#ff8c8c}
   </style>
 </head>
 <body>
@@ -35,7 +37,7 @@
     <header>
       <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Everyone's Picks</h1>
-        <span class="pill version-pill">v1.1</span>
+        <span class="pill version-pill">v1.2</span>
       </div>
       <div class="row">
         <a class="pill" href="index.html">← Back to App</a>
@@ -49,8 +51,10 @@
         <input id="email" type="email" placeholder="Email" />
         <input id="pass" type="password" placeholder="Password" />
         <button id="signInBtn" class="primary">Sign in</button>
+        <button id="createBtn">Create account</button>
       </div>
-      <div class="muted" style="margin-top:6px">Sign in to see this week's picks.</div>
+      <div id="authMsg" class="msg"></div>
+      <div class="muted" style="margin-top:6px">Sign in (or create an account) to see this week's picks.</div>
     </div>
 
     <div id="app" class="card" style="display:none">
@@ -71,10 +75,10 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
-      getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
-      getFirestore, collection, getDocs, orderBy, query, doc, getDoc
+      getFirestore, collection, getDocs, orderBy, query, doc, getDoc, setDoc, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -90,7 +94,16 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
-    await setPersistence(auth, browserLocalPersistence);
+
+    const el = (s) => document.querySelector(s);
+    const authMsg = el("#authMsg");
+
+    try {
+      await setPersistence(auth, browserLocalPersistence);
+    } catch (e) {
+      console.error(e);
+      authMsg.textContent = `Using session storage due to auth settings: ${e.message || e}`;
+    }
 
     const state = {
       season: String(new Date().getFullYear()),
@@ -101,15 +114,57 @@
 
     const lc = (s) => String(s || "").toLowerCase();
 
-    const el = (s) => document.querySelector(s);
-
-    el("#signInBtn").onclick = async () => {
+    async function signIn(){
       const email = el("#email").value.trim();
       const pass = el("#pass").value;
-      if (!email || !pass) { alert("Enter email and password."); return; }
-      try{ await signInWithEmailAndPassword(auth, email, pass); }
-      catch(e){ alert(e.message || e); }
-    };
+      authMsg.textContent = "";
+      authMsg.classList.remove("error");
+      if (!email || !pass) { authMsg.textContent = "Enter email and password."; authMsg.classList.add("error"); return; }
+      try {
+        await signInWithEmailAndPassword(auth, email, pass);
+        authMsg.textContent = "Signed in.";
+      } catch(e){
+        console.error(e);
+        authMsg.textContent = e.message || e.code || String(e);
+        authMsg.classList.add("error");
+      }
+    }
+
+    async function createAccount(){
+      const email = el("#email").value.trim();
+      const pass = el("#pass").value;
+      authMsg.textContent = "";
+      authMsg.classList.remove("error");
+      if (!email || !pass) { authMsg.textContent = "Enter email and password."; authMsg.classList.add("error"); return; }
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, pass);
+        await setDoc(doc(db, "users", cred.user.uid), {
+          displayName: email.split("@")[0],
+          email,
+          createdAt: serverTimestamp()
+        }, { merge: true });
+        authMsg.textContent = "Account created.";
+      } catch(e){
+        console.error(e);
+        if (e.code === "auth/email-already-in-use"){
+          authMsg.textContent = "Account exists — signing you in…";
+          try {
+            await signInWithEmailAndPassword(auth, email, pass);
+            authMsg.textContent = "Signed in.";
+          } catch(e2){
+            console.error(e2);
+            authMsg.textContent = e2.message || e2.code || String(e2);
+            authMsg.classList.add("error");
+          }
+        } else {
+          authMsg.textContent = e.message || e.code || String(e);
+          authMsg.classList.add("error");
+        }
+      }
+    }
+
+    el("#signInBtn").onclick = signIn;
+    el("#createBtn").onclick = createAccount;
 
     el("#signOutBtn").onclick = async () => { try{ await signOut(auth); } finally{ location.reload(); } };
     el("#refreshBtn").onclick = () => loadWeek();
