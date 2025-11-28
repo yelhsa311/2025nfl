@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v2.0)</title>
+<title>Family NFL Picks (v2.1)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v2.0</span>
+      <span class="pill version-pill">v2.1</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -429,7 +429,7 @@
     currentLockRef = lockRef;
     unsubLock = onSnapshot(lockRef, s => {
       const d = s.exists() ? s.data() : {};
-      const metaLock = d.locked ?? d.finalized ?? d.final ?? d.isFinal ?? d.lock;
+      const metaLock = [d.locked, d.finalized, d.final, d.isFinal, d.lock].some(v => v === true);
       state.lockAt = (d.lockAt && d.lockAt.seconds) ? (d.lockAt.seconds * 1000) : null;
       // Badge text
       const now = Date.now();
