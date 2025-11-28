@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v1.8)</title>
+<title>Family NFL Picks (v2.0)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v1.8</span>
+      <span class="pill version-pill">v2.0</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -176,9 +176,7 @@
       <select id="weekSelect"></select>
       <span id="lockBadge" class="lock muted">Open</span>
       <span class="pill" id="adminBadge" style="display:none">ADMIN</span>
-      <span class="pill" id="finalizeWrap" style="display:none">
-        <input id="adminWeekLock" type="checkbox" /> Finalize
-      </span>
+      <button id="finalizeBtn" class="pill" style="display:none">Finalize Week</button>
     </div>
 
     <!-- Legend updated to match new colors -->
@@ -289,7 +287,6 @@
 
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
   let autoLockApplied = false;
-  let pendingLock = null;
 
   function getEarliestKickoffMs(games){
     let min = null;
@@ -315,31 +312,47 @@
     return state.lock || autoLock;
   }
 
-  // Admin toggle for finalize/lock
-  el("#adminWeekLock")?.addEventListener("change", async (e) => {
-    const checked = e.target.checked;
+  function updateLockUi(autoLocked = false){
+    let label = "Open";
+    if (state.lock) label = "Finalized";
+    else if (state.lockAt && !autoLocked) label = "Locks " + new Date(state.lockAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    else if (autoLocked) label = "Locked (kickoff)";
+
+    el("#lockBadge").textContent = label;
+    el("#lockBadge").className   = "lock " + ((state.lock || autoLocked) ? "danger" : "muted");
+
+    const finalizeBtn = el("#finalizeBtn");
+    if (finalizeBtn){
+      finalizeBtn.textContent = state.lock ? "Unlock Week" : "Finalize Week";
+      finalizeBtn.title = state.lock ? "Re-open picks until the auto lock" : "Lock picks for everyone";
+      finalizeBtn.style.display = state.isAdmin ? "" : "none";
+    }
+  }
+
+  // Admin finalize button with confirmation
+  el("#finalizeBtn")?.addEventListener("click", async () => {
     if (!state.isAdmin || !currentLockRef){
-      e.target.checked = state.lock;
       return;
     }
-    pendingLock = checked;
+    const promptMsg = state.lock
+      ? "Unlock this week so users can keep making changes until it auto-locks 30 minutes before kickoff?"
+      : "Finalize this week and lock all picks?";
+    const confirmed = window.confirm(promptMsg);
+    // When locked, confirmation means unlock; when open, confirmation locks.
+    const desiredLock = state.lock ? (confirmed ? false : state.lock) : confirmed;
     try {
-      // Persist using all known legacy keys so other admin tools stay in sync
       await setDoc(currentLockRef, {
-        locked: checked,
-        finalized: checked,
-        lock: checked,
-        final: checked,
-        isFinal: checked
+        locked: desiredLock,
+        finalized: desiredLock,
+        lock: desiredLock,
+        final: desiredLock,
+        isFinal: desiredLock
       }, { merge:true });
-      state.lock = checked;
-      el("#lockBadge").textContent = checked ? "Finalized" : "Open";
-      el("#lockBadge").className   = "lock " + (checked ? "danger" : "muted");
+      state.lock = desiredLock;
+      updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
       renderGames();
     } catch (err) {
       console.error("finalize toggle", err);
-      pendingLock = null;
-      e.target.checked = state.lock;
     }
   });
 
@@ -370,7 +383,7 @@
 
     state.isAdmin = (window.ADMIN_UIDS||[]).includes(user.uid);
     el("#adminBadge").style.display    = state.isAdmin ? "" : "none";
-    el("#finalizeWrap").style.display  = state.isAdmin ? "" : "none";
+    el("#finalizeBtn").style.display  = state.isAdmin ? "" : "none";
 
     // Show or hide any .admin-only links (like Admin Grid)
     document.querySelectorAll(".admin-only").forEach(n => {
@@ -417,30 +430,16 @@
     unsubLock = onSnapshot(lockRef, s => {
       const d = s.exists() ? s.data() : {};
       const metaLock = d.locked ?? d.finalized ?? d.final ?? d.isFinal ?? d.lock;
-      state.lock = !!metaLock;
       state.lockAt = (d.lockAt && d.lockAt.seconds) ? (d.lockAt.seconds * 1000) : null;
       // Badge text
       const now = Date.now();
       const autoLocked = state.lockAt ? now >= state.lockAt : false;
+      state.lock = !!(metaLock || autoLocked);
       if (autoLocked && !state.lock && !autoLockApplied){
         autoLockApplied = true;
         setDoc(lockRef, { locked: true }, { merge:true }).catch(console.error);
       }
-      let label = "Open";
-      if (state.lock) label = "Finalized";
-      else if (state.lockAt && !autoLocked) label = "Locks " + new Date(state.lockAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      else if (autoLocked) label = "Locked (kickoff)";
-      el("#lockBadge").textContent = label;
-      el("#lockBadge").className   = "lock " + ((state.lock || autoLocked) ? "danger" : "muted");
-      const lockBox = el("#adminWeekLock");
-      if (lockBox){
-        if (pendingLock !== null && pendingLock !== state.lock){
-          lockBox.checked = pendingLock;
-        } else {
-          pendingLock = null;
-          lockBox.checked = state.lock;
-        }
-      }
+      updateLockUi(autoLocked);
       renderGames();
 
       // Live countdown timer
