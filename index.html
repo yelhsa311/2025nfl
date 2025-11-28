@@ -331,9 +331,14 @@
 
   // Admin finalize button with confirmation
   el("#finalizeBtn")?.addEventListener("click", async () => {
-    if (!state.isAdmin || !currentLockRef){
+    if (!state.isAdmin){
       return;
     }
+
+    // Guard against rare cases where the lock listener hasn't initialized yet
+    // (e.g., clicking immediately after sign-in). Build the ref on-demand.
+    const lockRef = currentLockRef || doc(db, "weeks", state.weekId, "meta", "lock");
+    currentLockRef = lockRef;
     const promptMsg = state.lock
       ? "Unlock this week so users can keep making changes until it auto-locks 30 minutes before kickoff?"
       : "Finalize this week and lock all picks?";
@@ -341,7 +346,7 @@
     // When locked, confirmation means unlock; when open, confirmation locks.
     const desiredLock = state.lock ? (confirmed ? false : state.lock) : confirmed;
     try {
-      await setDoc(currentLockRef, {
+      await setDoc(lockRef, {
         locked: desiredLock,
         finalized: desiredLock,
         lock: desiredLock,
