@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v10.3)</title>
+  <title>NFL Picks • User (v10.4)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -48,7 +48,7 @@
   <header>
     <div class="row" style="align-items:center; gap:10px">
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
-      <span class="pill version">v10.3</span>
+      <span class="pill version">v10.4</span>
     </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
@@ -349,18 +349,18 @@ document.getElementById('btnCreate')?.addEventListener('click', doCreate);
           const mine = myPicks.get(g.id);
           if (mine){
             if (mine === g.winner) {
-              tdStatus.textContent = '✓ Correct';
+              tdStatus.textContent = 'Your pick won';
               tdStatus.className = 'status-ok';
               correct++;
               tdPick.classList.add('pick-win');
               resultTag.style.display='inline-flex';
-              resultTag.innerHTML = '<span class="emoji">🏆</span><span>Your pick won</span>';
+              resultTag.innerHTML = `<span class="emoji">🏆</span><span>You picked ${mine} · Winner: ${g.winner}</span>`;
             } else {
-              tdStatus.textContent = '✗ Incorrect';
+              tdStatus.textContent = 'Your pick lost';
               tdStatus.className = 'status-bad';
               tdPick.classList.add('pick-loss');
               resultTag.style.display='inline-flex';
-              resultTag.innerHTML = `<span class="emoji">⚔️</span><span>Your pick (${mine}) lost · Winner: ${g.winner}</span>`;
+              resultTag.innerHTML = `<span class="emoji">⚔️</span><span>You picked ${mine} · Winner: ${g.winner}</span>`;
             }
           } else {
             tdStatus.textContent = '— (no pick)';
