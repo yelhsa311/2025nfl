@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family NFL Picks (v3.0)</title>
+  <title>Family NFL Picks (v3.1)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -149,7 +149,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Family NFL Picks</h1>
-        <span class="pill version-pill">v3.0</span>
+        <span class="pill version-pill">v3.1</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -284,6 +284,15 @@
 
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", picks:{}, games:[] };
 
+  let standingsTimer = null;
+  function scheduleStandingsCompute(){
+    clearTimeout(standingsTimer);
+    standingsTimer = setTimeout(() => {
+      standingsTimer = null;
+      computeWeekStandings();
+    }, 150);
+  }
+
   // --- Auth UI ---
   el("#signInBtn").onclick = async () => {
     const email = el("#email").value.trim();
@@ -368,7 +377,8 @@
 
   // --- Rendering ---
   function renderGames(){
-    const list = el("#gameList"); list.innerHTML="";
+    const list = el("#gameList");
+    const fragment = document.createDocumentFragment();
 
     const orderDays = ["Thursday","Friday","Saturday","Sunday","Monday"];
     const mapDay = d => {
@@ -446,24 +456,26 @@
       if (!arr.length) continue;
       arr.sort(sortByKick);
       const h = document.createElement("h2"); h.className="day"; h.textContent = d;
-      list.appendChild(h);
-      arr.forEach(g => list.appendChild(rowFor(g)));
+      fragment.appendChild(h);
+      arr.forEach(g => fragment.appendChild(rowFor(g)));
       any = true;
     }
     if (groups.Other.length){
       groups.Other.sort(sortByKick);
       const h = document.createElement("h2"); h.className="day"; h.textContent = "Other";
-      list.appendChild(h);
-      groups.Other.forEach(g => list.appendChild(rowFor(g)));
+      fragment.appendChild(h);
+      groups.Other.forEach(g => fragment.appendChild(rowFor(g)));
       any = true;
     }
+
+    list.replaceChildren(fragment);
 
     el("#noGames").style.display = any ? "none" : "";
 
     const wk = Number(state.weekId.split("-").pop());
     el("#wkNum").textContent = String(wk);
 
-    computeWeekStandings();
+    scheduleStandingsCompute();
   }
 
   // --- Actions ---
@@ -480,7 +492,7 @@
     const ref = doc(db, "weeks", state.weekId, "games", gameId);
     await setDoc(ref, { winner: side ?? null }, { merge:true });
     toast(side ? `Winner set: ${side}` : "Winner cleared");
-    computeWeekStandings();
+    scheduleStandingsCompute();
   }
 
   async function saveGame(){
@@ -515,7 +527,7 @@
     let n=0; for (const d of snap.docs){ await deleteDoc(d.ref); n++; }
     console.log("Cleared", n, "games for", state.weekId);
     toast("Cleared " + n + "games");
-    computeWeekStandings();
+    scheduleStandingsCompute();
   }
 
   // Seeder (kept)
@@ -532,7 +544,7 @@
       n++;
     }
     console.log("Seeded", n, "games into", state.weekId);
-    computeWeekStandings();
+    scheduleStandingsCompute();
   }
 
   // --- Standings (Week + Publish + Overall helper) ---
