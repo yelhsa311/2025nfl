@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Everyone's Picks (v1.0)</title>
+  <title>Everyone's Picks (v1.1)</title>
   <style>
     :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--good:#86f5b2;--bad:#ff8c8c;--info:#c7b6ff;}
     *{box-sizing:border-box}
@@ -35,7 +35,7 @@
     <header>
       <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Everyone's Picks</h1>
-        <span class="pill version-pill">v1.0</span>
+        <span class="pill version-pill">v1.1</span>
       </div>
       <div class="row">
         <a class="pill" href="index.html">← Back to App</a>
@@ -55,6 +55,9 @@
 
     <div id="app" class="card" style="display:none">
       <div class="row">
+        <label>Season:
+          <input id="seasonInput" type="number" style="width:110px" />
+        </label>
         <label>Week:
           <select id="weekSelect"></select>
         </label>
@@ -71,17 +74,17 @@
       getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
-      getFirestore, collection, collectionGroup, documentId, getDocs, orderBy, query, where
+      getFirestore, collection, getDocs, orderBy, query, doc, getDoc
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
     const firebaseConfig = {
-      apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
-      authDomain: "nfl-picks-b83c2.firebaseapp.com",
-      projectId: "nfl-picks-b83c2",
-      storageBucket: "nfl-picks-b83c2.appspot.com",
-      messagingSenderId: "802058909501",
-      appId: "1:802058909501:web:bb935c188891934de07754",
-      measurementId: "G-MSJHYZ4VG2"
+      apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
+      authDomain: "nflpicks2025-51202.firebaseapp.com",
+      projectId: "nflpicks2025-51202",
+      storageBucket: "nflpicks2025-51202.appspot.com",
+      messagingSenderId: "125791202188",
+      appId: "1:125791202188:web:903f4c74dc84a5b69604a9",
+      measurementId: "G-289KXJQZGG"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -90,10 +93,13 @@
     await setPersistence(auth, browserLocalPersistence);
 
     const state = {
-      weekId: "2025-Week-01",
+      season: String(new Date().getFullYear()),
+      week: "01",
       games: [],
-      picks: [] // { email, picks }
+      picks: [] // { userId, name, email, picks }
     };
+
+    const lc = (s) => String(s || "").toLowerCase();
 
     const el = (s) => document.querySelector(s);
 
@@ -121,24 +127,31 @@
       el("#userTag").style.display = "inline-flex";
       el("#userTag").textContent = user.email;
       el("#signOutBtn").style.display = "inline-flex";
-      await setupWeeks();
+      setupWeeks();
       await loadWeek();
     });
 
     function setupWeeks(){
       const sel = el("#weekSelect"); sel.innerHTML = "";
       for (let i=1;i<=18;i++){
-        const id = `2025-Week-${String(i).padStart(2,"0")}`;
         const o = document.createElement("option");
-        o.value = id; o.textContent = `Week ${i}`;
+        o.value = String(i).padStart(2,"0"); o.textContent = `Week ${i}`;
         sel.appendChild(o);
       }
-      const remembered = localStorage.getItem("everyoneWeekId");
-      if (remembered) state.weekId = remembered;
-      sel.value = state.weekId;
+      const seasonInput = el("#seasonInput");
+      const rememberedSeason = localStorage.getItem("everyoneSeason");
+      if (rememberedSeason) state.season = rememberedSeason;
+      const rememberedWeek = localStorage.getItem("everyoneWeekId");
+      if (rememberedWeek) state.week = rememberedWeek;
+      seasonInput.value = state.season;
+      sel.value = state.week;
+      seasonInput.onchange = () => {
+        state.season = seasonInput.value.trim();
+        localStorage.setItem("everyoneSeason", state.season);
+      };
       sel.onchange = () => {
-        state.weekId = sel.value;
-        localStorage.setItem("everyoneWeekId", state.weekId);
+        state.week = sel.value;
+        localStorage.setItem("everyoneWeekId", state.week);
         loadWeek();
       };
     }
@@ -153,17 +166,16 @@
     async function loadGames(){
       state.games = [];
       try{
-        const q = query(collection(db, "weeks", state.weekId, "games"), orderBy("kickoffTs", "asc"));
+        const q = query(collection(db, "seasons", state.season, "weeks", state.week, "games"), orderBy("kickoff", "asc"));
         const snap = await getDocs(q);
         snap.forEach(d => {
           const v = d.data();
           state.games.push({
             id: d.id,
-            day: v.day || "",
             home: v.home || "",
             away: v.away || "",
-            kickoffTs: typeof v.kickoffTs === "number" ? v.kickoffTs : null,
-            winner: v.winner || ""
+            winner: v.winner || "",
+            kickoff: v.kickoff?.toMillis ? v.kickoff.toMillis() : (v.kickoff || v.kickoffTs || null)
           });
         });
       }catch(e){ setStatus("Game load error: " + (e.message||e)); }
@@ -172,16 +184,40 @@
     async function loadPicks(){
       state.picks = [];
       try{
-        let snap = await getDocs(query(collectionGroup(db, "weeks"), where("weekId", "==", state.weekId)));
-        if (snap.empty){
-          snap = await getDocs(query(collectionGroup(db, "weeks"), where(documentId(), "==", state.weekId)));
-        }
+        const snap = await getDocs(collection(db, "seasons", state.season, "weeks", state.week, "picks"));
+        const byUser = new Map();
         snap.forEach(d => {
           const data = d.data() || {};
-          const email = (data.email || "").trim() || d.ref.path.split("/")[1] || "";
-          state.picks.push({ email, picks: data.picks || {} });
+          const uid = data.userId || "unknown";
+          const gameId = data.gameId || d.id.split("_")[1] || "";
+          if (!gameId) return;
+          const entry = byUser.get(uid) || { userId: uid, picks: {} };
+          entry.picks[gameId] = data.pick || "";
+          byUser.set(uid, entry);
         });
-        state.picks.sort((a,b)=>a.email.localeCompare(b.email));
+
+        const enriched = [];
+        for (const entry of byUser.values()){
+          let name = "";
+          let email = "";
+          try {
+            const uDoc = await getDoc(doc(db, "users", entry.userId));
+            if (uDoc.exists()){
+              const u = uDoc.data() || {};
+              name = u.displayName || u.userName || u.name || "";
+              email = u.email || u.userEmail || "";
+            }
+          } catch {}
+          enriched.push({ ...entry, name, email });
+        }
+
+        enriched.sort((a,b)=>{
+          const aLabel = a.name || a.email || a.userId;
+          const bLabel = b.name || b.email || b.userId;
+          return aLabel.localeCompare(bLabel);
+        });
+
+        state.picks = enriched;
       }catch(e){ setStatus("Pick load error: " + (e.message||e)); }
     }
 
@@ -192,18 +228,18 @@
       const headerCells = ["<th style='min-width:200px'>User</th>"];
       state.games.forEach((g, idx) => {
         const label = `${idx+1}. ${g.away} @ ${g.home}`;
-        const win = g.winner ? `<div class='note'>Winner: ${g[g.winner] || g.winner}</div>` : "";
+        const win = g.winner ? `<div class='note'>Winner: ${g.winner}</div>` : "";
         headerCells.push(`<th style="min-width:160px">${label}${win}</th>`);
       });
 
-      const rows = state.picks.map(({ email, picks }) => {
-        const cells = [`<td>${email || "(unknown)"}</td>`];
+      const rows = state.picks.map(({ name, email, userId, picks }) => {
+        const label = name || email || userId || "(unknown)";
+        const cells = [`<td>${label}</td>`];
         for (const g of state.games){
           const choice = picks[g.id];
-          const label = choice === "home" ? g.home : choice === "away" ? g.away : "—";
+          const chipLabel = choice || "No pick";
           const hasWinner = !!g.winner;
-          const status = !choice ? "pending" : hasWinner ? (g.winner === choice ? "win" : "lose") : "pending";
-          const chipLabel = !choice ? "No pick" : label;
+          const status = !choice ? "pending" : hasWinner ? (lc(g.winner) === lc(choice) ? "win" : "lose") : "pending";
           cells.push(`<td><span class="chip ${status}">${statusIcon(status)} ${chipLabel}</span></td>`);
         }
         return `<tr>${cells.join("")}</tr>`;
