@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family NFL Picks (v2.9)</title>
+  <title>Family NFL Picks (v3.0)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -132,7 +132,6 @@
   .muted{color:var(--muted)}
   .danger{color:var(--bad)}
   .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px}
-  .lock{padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
   .disabled{opacity:.6;pointer-events:none}
   h2.day{margin:16px 0 8px}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#000a;color:#fff;padding:10px 14px;border-radius:999px;opacity:0;transition:opacity .2s;z-index:1000}
@@ -150,7 +149,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Family NFL Picks</h1>
-        <span class="pill version-pill">v2.9</span>
+        <span class="pill version-pill">v3.0</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -174,9 +173,7 @@
     <div class="row">
       <label>Week:</label>
       <select id="weekSelect"></select>
-      <span id="lockBadge" class="lock muted">Open</span>
       <span class="pill" id="adminBadge" style="display:none">ADMIN</span>
-      <button id="finalizeBtn" class="pill" style="display:none">Lock Now</button>
     </div>
 
     <!-- Legend updated to match new colors -->
@@ -285,174 +282,7 @@
   const el = s => document.querySelector(s);
   const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
 
-  const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
-  let autoLockApplied = false;
-  let lockSaveInFlight = false;
-  let lockRefs = { primary:null, legacy:null };
-  let currentLockRef = null;
-  let autoLockCron = null;
-
-  function ensureLockRefs(){
-    if (!state.weekId) throw new Error("No week selected");
-
-    lockRefs = {
-      primary: doc(db, "weeks", state.weekId),
-      legacy: doc(db, "weeks", state.weekId, "meta", "lock")
-    };
-
-    return lockRefs;
-  }
-
-  function getEarliestKickoffMs(games){
-    let min = null;
-    for (const g of games || []){
-      const ms = typeof g.kickoffTs === "number" ? g.kickoffTs
-               : (g.kickoff ? Date.parse(g.kickoff) : null);
-      if (Number.isFinite(ms)) min = (min==null) ? ms : Math.min(min, ms);
-    }
-    return min;
-  }
-
-  // 30 minutes before first kickoff
-  function computeAutoLockAtMs(){
-    const first = getEarliestKickoffMs(state.games);
-    if (first == null) return null;
-    return first - 30 * 60 * 1000;
-  }
-
-  // true if picks are locked for non-admins
-  function isWriteLocked(){
-    const now = Date.now();
-    const autoLock = state.lockAt ? (now >= state.lockAt) : false;
-    return state.lock || autoLock;
-  }
-
-  function updateLockUi(autoLocked = false){
-    let label = "Open";
-    if (state.lock) label = "Finalized";
-    else if (state.lockAt && !autoLocked) label = "Locks " + new Date(state.lockAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    else if (autoLocked) label = "Locked (kickoff)";
-
-    el("#lockBadge").textContent = label;
-    el("#lockBadge").className   = "lock " + ((state.lock || autoLocked) ? "danger" : "muted");
-
-    const finalizeBtn = el("#finalizeBtn");
-    if (finalizeBtn){
-      finalizeBtn.textContent = state.lock ? "Locked" : "Lock Now";
-      finalizeBtn.title = state.lock ? "Week is locked" : "Lock picks for everyone immediately";
-      finalizeBtn.disabled = !!(state.lock || autoLocked);
-      finalizeBtn.style.display = state.isAdmin ? "" : "none";
-    }
-  }
-
-  function startAutoLockCron(){
-    clearInterval(autoLockCron);
-    if (!state.lockAt || state.lock) return;
-
-    const maybeLock = async () => {
-      if (state.lock || lockSaveInFlight || !state.lockAt) return;
-      const now = Date.now();
-      if (now < state.lockAt) return;
-      lockSaveInFlight = true;
-      try {
-        await persistLock({ locked: true, autoLockedAt: Timestamp.fromMillis(now) });
-        state.lock = true;
-        updateLockUi(true);
-        renderGames();
-      } catch (err) {
-        console.warn("auto-lock cron", err);
-      } finally {
-        lockSaveInFlight = false;
-        clearInterval(autoLockCron);
-      }
-    };
-
-    // run every 15s as a lightweight client-side cron
-    autoLockCron = setInterval(maybeLock, 15000);
-    maybeLock();
-  }
-
-  async function persistLock(payload){
-    const rebuilt = ensureLockRefs();
-    const refs = [currentLockRef, rebuilt.primary, rebuilt.legacy].filter(Boolean);
-    const tried = new Set();
-
-    if (!refs.length) throw new Error("No lock document reference available");
-
-    lockSaveInFlight = true;
-    let lastErr = null;
-
-    // Try up to three times with a short backoff to dodge transient errors.
-    for (let attempt = 0; attempt < 3; attempt++){
-      for (const ref of refs){
-        const key = `${attempt}-${ref.path}`;
-        if (tried.has(key)) continue;
-        tried.add(key);
-        try {
-          await setDoc(ref, payload, { merge:true });
-          currentLockRef = ref;
-          lockSaveInFlight = false;
-          return ref;
-        } catch (err) {
-          console.warn(`lock write (attempt ${attempt+1}) failed for`, ref.path, err);
-          lastErr = err;
-        }
-      }
-      await new Promise(res => setTimeout(res, 200 + attempt * 150));
-    }
-
-    lockSaveInFlight = false;
-    throw lastErr || new Error("Unable to persist lock state");
-  }
-
-  // Admin one-way "Lock now" button with confirmation (no unlock)
-  el("#finalizeBtn")?.addEventListener("click", async () => {
-    if (!state.isAdmin) return;
-    if (lockSaveInFlight || state.lock) return;
-
-    const finalizeBtn = el("#finalizeBtn");
-    finalizeBtn.disabled = true;
-    lockSaveInFlight = true;
-
-    const ok = confirm("Lock this week now? This cannot be unlocked.");
-    if (!ok){ finalizeBtn.disabled = false; lockSaveInFlight = false; return; }
-
-    const lockPayload = {
-      locked: true,
-      finalized: true,
-      lock: true,
-      final: true,
-      isFinal: true,
-      lockedAt: Timestamp.fromMillis(Date.now()),
-      lockedBy: state.user?.email || state.user?.uid || "admin"
-    };
-
-    try {
-      const lockRef = await persistLock(lockPayload);
-
-      // Optimistically update the UI even if the verification read fails
-      let persistedLock = true;
-      try {
-        const snap = await getDoc(lockRef);
-        const saved = snap.exists() ? snap.data() : lockPayload;
-        persistedLock = [saved.locked, saved.finalized, saved.final, saved.isFinal, saved.lock].some(v => v === true);
-      } catch (verifyErr) {
-        console.warn("lock verification", verifyErr);
-      }
-
-      state.lock = persistedLock;
-      updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
-      renderGames();
-      toast("Week locked for all players.");
-    } catch (err) {
-      console.error("lock now", err);
-      updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
-      alert("Unable to lock the week. Please try again.");
-    } finally {
-      finalizeBtn.disabled = true;
-      lockSaveInFlight = false;
-    }
-  });
+  const state = { user:null, isAdmin:false, weekId:"2025-Week-01", picks:{}, games:[] };
 
   // --- Auth UI ---
   el("#signInBtn").onclick = async () => {
@@ -481,7 +311,6 @@
 
     state.isAdmin = (window.ADMIN_UIDS||[]).includes(user.uid);
     el("#adminBadge").style.display    = state.isAdmin ? "" : "none";
-    el("#finalizeBtn").style.display  = state.isAdmin ? "" : "none";
 
     // Show or hide any .admin-only links (like Admin Grid)
     document.querySelectorAll(".admin-only").forEach(n => {
@@ -515,80 +344,10 @@
     };
   }
 
-  let unsubGames=null, unsubLock=null, unsubMyPicks=null;
+  let unsubGames=null, unsubMyPicks=null;
 
   async function subscribeWeek(){
-    unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
-    autoLockApplied = false;
-    clearInterval(autoLockCron); autoLockCron = null;
-
-    lockRefs = {
-      primary: doc(db, "weeks", state.weekId),
-      legacy: doc(db, "weeks", state.weekId, "meta", "lock")
-    };
-    currentLockRef = lockRefs.primary;
-
-    const handleLockSnapshot = (snap, source) => {
-      if (lockSaveInFlight && snap.metadata?.fromCache){
-        // Ignore cached reads while a save is in flight to avoid UI flicker.
-        return;
-      }
-
-      const d = snap.exists() ? snap.data() : {};
-      const metaLock = [d.locked, d.finalized, d.final, d.isFinal, d.lock].some(v => v === true);
-      const lockAtMs = d.lockAt?.seconds ? (d.lockAt.seconds * 1000) : (typeof d.lockAt === "number" ? d.lockAt : null);
-      const hasLockData = metaLock || lockAtMs != null || ["lockedAt", "lockedBy", "autoLockedAt"].some(k => k in d);
-
-      if (source === "primary"){
-        state.__primaryLockSeen = true;
-        state.__primaryLockHasData = hasLockData;
-        if (hasLockData) currentLockRef = lockRefs.primary;
-      } else if (source === "legacy") {
-        if (state.__primaryLockHasData) return; // prefer primary when it has lock fields
-        currentLockRef = lockRefs.legacy;
-      }
-
-      state.lockAt = lockAtMs;
-      startAutoLockCron();
-
-      const now = Date.now();
-      const autoLocked = state.lockAt ? now >= state.lockAt : false;
-      state.lock = !!(metaLock || autoLocked);
-
-      if (autoLocked && !state.lock && !autoLockApplied){
-        autoLockApplied = true;
-        persistLock({ locked: true }).catch(console.error);
-      }
-
-      updateLockUi(autoLocked);
-      renderGames();
-
-      clearInterval(window.__lockTicker);
-      if (state.lock || !state.lockAt) return;
-      function tick(){
-        const now = Date.now();
-        const diff = state.lockAt - now;
-        if (diff <= 0){
-          el("#lockBadge").textContent = "Locked (kickoff)";
-          el("#lockBadge").className   = "lock danger";
-          clearInterval(window.__lockTicker);
-          renderGames();
-          return;
-        }
-        const m = Math.floor(diff / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        el("#lockBadge").textContent = `Locks in ${m}m ${String(s).padStart(2, "0")}s`;
-        el("#lockBadge").className   = "lock muted";
-      }
-      tick();
-      window.__lockTicker = setInterval(tick, 1000);
-    };
-
-    state.__primaryLockSeen = false;
-    state.__primaryLockHasData = false;
-    const unsubPrimary = onSnapshot(lockRefs.primary, snap => handleLockSnapshot(snap, "primary"), e => console.error("lock listener", e));
-    const unsubLegacy = onSnapshot(lockRefs.legacy, snap => handleLockSnapshot(snap, "legacy"), e => console.error("legacy lock listener", e));
-    unsubLock = () => { unsubPrimary?.(); unsubLegacy?.(); };
+    unsubGames?.(); unsubMyPicks?.();
 
     // Games (ordered by createdAt; UI sorts by kickoffTs)
     const gamesCol = collection(db, "weeks", state.weekId, "games");
@@ -596,15 +355,6 @@
       state.games = []; snap.forEach(d => state.games.push({ id:d.id, ...d.data() }));
       el("#noGames").style.display = state.games.length ? "none" : "";
       renderGames();
-
-      // Auto-sync lockAt to 30 minutes before earliest kickoff
-      const ms = computeAutoLockAtMs();
-      const desiredLockAtMs = ms || null;
-      const currentLockAtMs = state.lockAt;
-      if (desiredLockAtMs !== currentLockAtMs){
-        const lockAtPayload = desiredLockAtMs ? { lockAt: Timestamp.fromMillis(desiredLockAtMs) } : { lockAt: null };
-        persistLock(lockAtPayload).catch(console.error);
-      }
     }, e => console.error("games listener", e));
 
     // My picks
@@ -659,9 +409,6 @@
       // game result highlight (admin-set) → final is purple, correct stays green
       if (g.winner === "home") home.classList.add("result");
       if (g.winner === "away") away.classList.add("result");
-
-      // lock picks for non-admin when finalized
-      if (!state.isAdmin && isWriteLocked()){ home.classList.add("disabled"); away.classList.add("disabled"); }
 
       home.onclick = () => choose(g.id, "home");
       away.onclick = () => choose(g.id, "away");
@@ -721,7 +468,6 @@
 
   // --- Actions ---
   async function choose(gameId, side){
-    if (!state.isAdmin && isWriteLocked()) return;
     state.picks[gameId] = side;
     const ref = doc(db, "picks", state.user.uid, "weeks", state.weekId);
     await setDoc(ref, { weekId: state.weekId, picks: state.picks, updatedAt: Date.now(), email: state.user.email }, { merge:true });
