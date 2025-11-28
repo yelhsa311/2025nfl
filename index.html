@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family NFL Picks (v3.1)</title>
+  <title>Family NFL Picks (v3.2)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -149,11 +149,12 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Family NFL Picks</h1>
-        <span class="pill version-pill">v3.1</span>
+        <span class="pill version-pill">v3.2</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
     <a href="admin-grid.html" class="admin-only" style="margin-left:10px;">🗂 Admin Grid</a>
+    <a href="week-picks.html" class="pill">👥 See Everyone's Picks</a>
     <div id="userBox" class="row"></div>
   </div>
 
@@ -431,7 +432,6 @@
         adminRow.innerHTML = `
           <button class="badge" data-act="win-home">Set Home as Winner</button>
           <button class="badge" data-act="win-away">Set Away as Winner</button>
-          <button class="badge" data-act="clear">Clear</button>
         `;
         vs.appendChild(adminRow);
         adminRow.addEventListener("click", (e) => {
@@ -439,7 +439,6 @@
           const act = btn.getAttribute("data-act");
           if (act === "win-home")  setWinner(g.id, "home");
           if (act === "win-away")  setWinner(g.id, "away");
-          if (act === "clear")     setWinner(g.id, null);
         });
       }
 
