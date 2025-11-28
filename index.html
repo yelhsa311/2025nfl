@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family NFL Picks (v2.8)</title>
+  <title>Family NFL Picks (v2.9)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Family NFL Picks</h1>
-        <span class="pill version-pill">v2.8</span>
+        <span class="pill version-pill">v2.9</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -176,7 +176,7 @@
       <select id="weekSelect"></select>
       <span id="lockBadge" class="lock muted">Open</span>
       <span class="pill" id="adminBadge" style="display:none">ADMIN</span>
-      <button id="finalizeBtn" class="pill" style="display:none">Finalize Week</button>
+      <button id="finalizeBtn" class="pill" style="display:none">Lock Now</button>
     </div>
 
     <!-- Legend updated to match new colors -->
@@ -290,6 +290,7 @@
   let lockSaveInFlight = false;
   let lockRefs = { primary:null, legacy:null };
   let currentLockRef = null;
+  let autoLockCron = null;
 
   function ensureLockRefs(){
     if (!state.weekId) throw new Error("No week selected");
@@ -337,10 +338,38 @@
 
     const finalizeBtn = el("#finalizeBtn");
     if (finalizeBtn){
-      finalizeBtn.textContent = state.lock ? "Unlock Week" : "Finalize Week";
-      finalizeBtn.title = state.lock ? "Re-open picks until the auto lock" : "Lock picks for everyone";
+      finalizeBtn.textContent = state.lock ? "Locked" : "Lock Now";
+      finalizeBtn.title = state.lock ? "Week is locked" : "Lock picks for everyone immediately";
+      finalizeBtn.disabled = !!(state.lock || autoLocked);
       finalizeBtn.style.display = state.isAdmin ? "" : "none";
     }
+  }
+
+  function startAutoLockCron(){
+    clearInterval(autoLockCron);
+    if (!state.lockAt || state.lock) return;
+
+    const maybeLock = async () => {
+      if (state.lock || lockSaveInFlight || !state.lockAt) return;
+      const now = Date.now();
+      if (now < state.lockAt) return;
+      lockSaveInFlight = true;
+      try {
+        await persistLock({ locked: true, autoLockedAt: Timestamp.fromMillis(now) });
+        state.lock = true;
+        updateLockUi(true);
+        renderGames();
+      } catch (err) {
+        console.warn("auto-lock cron", err);
+      } finally {
+        lockSaveInFlight = false;
+        clearInterval(autoLockCron);
+      }
+    };
+
+    // run every 15s as a lightweight client-side cron
+    autoLockCron = setInterval(maybeLock, 15000);
+    maybeLock();
   }
 
   async function persistLock(payload){
@@ -376,39 +405,37 @@
     throw lastErr || new Error("Unable to persist lock state");
   }
 
-  // Admin finalize button with confirmation
+  // Admin one-way "Lock now" button with confirmation (no unlock)
   el("#finalizeBtn")?.addEventListener("click", async () => {
-    if (!state.isAdmin){
-      return;
-    }
+    if (!state.isAdmin) return;
+    if (lockSaveInFlight || state.lock) return;
 
     const finalizeBtn = el("#finalizeBtn");
     finalizeBtn.disabled = true;
-    const prevLock = state.lock;
+    lockSaveInFlight = true;
 
-    const promptMsg = state.lock
-      ? "Unlock this week so users can keep making changes until it auto-locks 30 minutes before kickoff?"
-      : "Finalize this week and lock all picks?";
-    const confirmed = window.confirm(promptMsg);
-    // When locked, confirmation means unlock; when open, confirmation locks.
-    const desiredLock = state.lock ? (confirmed ? false : state.lock) : confirmed;
+    const ok = confirm("Lock this week now? This cannot be unlocked.");
+    if (!ok){ finalizeBtn.disabled = false; lockSaveInFlight = false; return; }
+
     const lockPayload = {
-      locked: desiredLock,
-      finalized: desiredLock,
-      lock: desiredLock,
-      final: desiredLock,
-      isFinal: desiredLock
+      locked: true,
+      finalized: true,
+      lock: true,
+      final: true,
+      isFinal: true,
+      lockedAt: Timestamp.fromMillis(Date.now()),
+      lockedBy: state.user?.email || state.user?.uid || "admin"
     };
 
     try {
       const lockRef = await persistLock(lockPayload);
 
       // Optimistically update the UI even if the verification read fails
-      let persistedLock = desiredLock;
+      let persistedLock = true;
       try {
         const snap = await getDoc(lockRef);
         const saved = snap.exists() ? snap.data() : lockPayload;
-        persistedLock = [saved.locked, saved.finalized, saved.final, saved.isFinal, saved.lock].some(v => v === true) || desiredLock;
+        persistedLock = [saved.locked, saved.finalized, saved.final, saved.isFinal, saved.lock].some(v => v === true);
       } catch (verifyErr) {
         console.warn("lock verification", verifyErr);
       }
@@ -416,14 +443,13 @@
       state.lock = persistedLock;
       updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
       renderGames();
-      toast(state.lock ? "Week finalized. Picks are locked." : "Week unlocked.");
+      toast("Week locked for all players.");
     } catch (err) {
-      console.error("finalize toggle", err);
-      state.lock = prevLock;
+      console.error("lock now", err);
       updateLockUi(state.lockAt ? Date.now() >= state.lockAt : false);
-      alert("Unable to save the lock state. Please try again.");
+      alert("Unable to lock the week. Please try again.");
     } finally {
-      finalizeBtn.disabled = false;
+      finalizeBtn.disabled = true;
       lockSaveInFlight = false;
     }
   });
@@ -494,6 +520,7 @@
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
     autoLockApplied = false;
+    clearInterval(autoLockCron); autoLockCron = null;
 
     lockRefs = {
       primary: doc(db, "weeks", state.weekId),
@@ -521,6 +548,7 @@
       }
 
       state.lockAt = lockAtMs;
+      startAutoLockCron();
 
       const now = Date.now();
       const autoLocked = state.lockAt ? now >= state.lockAt : false;
