@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Family NFL Picks (v1.3)</title>
+<title>Family NFL Picks (v1.4)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -150,7 +150,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
       <h1 style="margin:0">Family NFL Picks</h1>
-      <span class="pill version-pill">v1.3</span>
+      <span class="pill version-pill">v1.4</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -288,6 +288,7 @@
   const toast = (msg="Saved!") => { const t=el("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),900); };
 
   const state = { user:null, isAdmin:false, weekId:"2025-Week-01", lock:false, picks:{}, games:[], lockAt:null };
+  let autoLockApplied = false;
 
   function getEarliestKickoffMs(games){
     let min = null;
@@ -378,6 +379,7 @@
 
   async function subscribeWeek(){
     unsubGames?.(); unsubLock?.(); unsubMyPicks?.();
+    autoLockApplied = false;
 
     // Lock meta
     const lockRef = doc(db, "weeks", state.weekId, "meta", "lock");
@@ -388,6 +390,10 @@
       // Badge text
       const now = Date.now();
       const autoLocked = state.lockAt ? now >= state.lockAt : false;
+      if (autoLocked && !state.lock && !autoLockApplied){
+        autoLockApplied = true;
+        setDoc(lockRef, { locked: true }, { merge:true }).catch(console.error);
+      }
       let label = "Open";
       if (state.lock) label = "Finalized";
       else if (state.lockAt && !autoLocked) label = "Locks " + new Date(state.lockAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -430,17 +436,13 @@
       el("#noGames").style.display = state.games.length ? "none" : "";
       renderGames();
 
-      // Admin auto-sync of lockAt: keep meta.lockAt = (earliest kickoff - 30m)
-      if (state.isAdmin){
-        const ms = computeAutoLockAtMs();
-        const want = ms ? Timestamp.fromMillis(ms) : null;
-        onSnapshot(lockRef, s => {
-          const d = s.exists() ? s.data() : {};
-          const cur = d.lockAt && d.lockAt.seconds ? d.lockAt.seconds * 1000 : null;
-          if ((want && cur !== ms) || (!want && cur != null)) {
-            setDoc(lockRef, want ? { lockAt: want } : { lockAt: null }, { merge: true }).catch(console.error);
-          }
-        }, () => {});
+      // Auto-sync lockAt to 30 minutes before earliest kickoff
+      const ms = computeAutoLockAtMs();
+      const desiredLockAtMs = ms || null;
+      const currentLockAtMs = state.lockAt;
+      if (desiredLockAtMs !== currentLockAtMs){
+        const lockAtPayload = desiredLockAtMs ? { lockAt: Timestamp.fromMillis(desiredLockAtMs) } : { lockAt: null };
+        setDoc(lockRef, lockAtPayload, { merge:true }).catch(console.error);
       }
     }, e => console.error("games listener", e));
 
