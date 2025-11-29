@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v20.2)</title>
+  <title>Admin Importer — Games Only (v20.3)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.2</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.3</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -162,6 +162,17 @@
     const weekId = (season, w) => season + "-Week-" + fmt2(w);
     const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const uidFromEmail = email => slug(email).slice(0,64);
+    function withTimeout(promise, label, timeoutMs){
+      const ms = Math.max(1000, timeoutMs||15000);
+      const tag = label || 'Operation';
+      let timer;
+      return Promise.race([
+        promise.finally(function(){ clearTimeout(timer); }),
+        new Promise(function(_resolve, reject){
+          timer = setTimeout(function(){ reject(new Error(tag + ' timed out after ' + Math.round(ms/1000) + 's')); }, ms);
+        })
+      ]);
+    }
     function toLocal(iso){ if(!iso) return ""; const d=new Date(iso);
       const y=d.getFullYear(), m=fmt2(d.getMonth()+1), da=fmt2(d.getDate()), h=fmt2(d.getHours()), mi=fmt2(d.getMinutes());
       return y+"-"+m+"-"+da+"T"+h+":"+mi;
@@ -501,13 +512,13 @@
       }
       return { headers:headers, games:games, rows:rows, hasPick: hasPick };
     }
-    async function commitChunks(actions, chunkSize, label){
+    async function commitChunks(actions, chunkSize, label, timeoutMs){
       const total = actions.length;
       let done = 0;
       for(let i=0;i<actions.length;i+=chunkSize){
         const b = db.batch();
         actions.slice(i, i+chunkSize).forEach(function(fn){ fn(b); });
-        await b.commit();
+        await withTimeout(b.commit(), label ? (label + ' commit') : 'Batch commit', timeoutMs);
         done += Math.min(chunkSize, total - i);
         if(label) impLog(label + ' chunk committed (' + done + '/' + total + ')');
         impProg(Math.min(90, Math.round((done/Math.max(total,1))*70)+20));
@@ -589,6 +600,7 @@
           };
         });
         if(writeFns.length){
+          impSetStatus('Writing new games…');
           await commitChunks(writeFns, 400, 'Write');
         }
         impLog("Wrote " + state.parsed.games.length + " game(s)");
