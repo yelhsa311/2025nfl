@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v20.1)</title>
+  <title>Admin Importer — Games Only (v20.2)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.1</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.2</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -180,6 +180,13 @@
     function impProg(v){ var el=byId('impProg'); el.style.display='block'; el.value=v; }
     function impProgDone(){ var el=byId('impProg'); el.style.display='none'; el.value=0; }
     function impClearLog(){ var L=byId('log'); L.textContent=''; }
+    function setImportBusy(isBusy){
+      ['impRunBtn','impPreviewBtn','impFile','genTplBtn','openImportBtn'].forEach(function(id){
+        const el = byId(id);
+        if (el){ el.disabled = !!isBusy; }
+      });
+      state.importing = !!isBusy;
+    }
     function hidePreview(){
       byId('previewCard').style.display = 'none';
       byId('previewTable').innerHTML = '';
@@ -194,7 +201,7 @@
     }
 
     // ===== State =====
-    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
+    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null, importing:false };
     // Legacy guard: older pick-import code referenced pickUid/hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
     var pickUid = null;
     var pickUser = null;
@@ -276,6 +283,10 @@
       ['dragenter','dragover'].forEach(function(evt){ drop.addEventListener(evt, function(e){ e.preventDefault(); drop.classList.add('drag'); }); });
       ['dragleave','drop'].forEach(function(evt){ drop.addEventListener(evt, function(e){ e.preventDefault(); drop.classList.remove('drag'); }); });
       drop.addEventListener('drop', function(e){
+        if(state.importing){
+          impSetStatus('Import already in progress. Please wait for it to finish.');
+          return;
+        }
         var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if(!f) return;
         resetImportUi('File dropped — parsing…');
@@ -526,6 +537,7 @@
     }
     async function previewCsv(){
       try{
+        if(state.importing){ impSetStatus('Import already running. Please wait.'); return; }
         const f = byId('impFile').files[0];
         state.parsed = await parseCsvFile(f);
         if(state.parsed){
@@ -540,6 +552,11 @@
       }
     }
     async function runImport(){
+      if(state.importing){
+        impSetStatus('Import already running. Please wait for it to finish.');
+        return;
+      }
+      setImportBusy(true);
       impClearLog();
       try{
         const f = byId('impFile').files[0];
@@ -594,6 +611,7 @@
         console.error(err); impSetStatus("❌ Import failed. See details below."); impLog(err && err.message ? err.message : String(err)); alert("Import failed: " + (err && err.message ? err.message : String(err)));
       } finally {
         impProgDone();
+        setImportBusy(false);
       }
     }
     function generateTemplate(){
