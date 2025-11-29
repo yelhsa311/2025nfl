@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v14)</title>
+  <title>NFL Picks • User (v14.1)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -48,7 +48,7 @@
   <header>
     <div class="row" style="align-items:center; gap:10px">
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
-      <span class="pill version">v14</span>
+      <span class="pill version">v14.1</span>
     </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
@@ -158,6 +158,16 @@
     const ts = () => serverTimestamp();
     function clearTable(tbody){ while (tbody.firstChild) tbody.removeChild(tbody.firstChild); }
     function fmtPct(c,t){ return t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—'; }
+    function kickoffMs(g){
+      if (!g) return null;
+      if (typeof g.kickoffTs === 'number' && Number.isFinite(g.kickoffTs)) return g.kickoffTs;
+      if (g.kickoff?.toDate) return g.kickoff.toDate().getTime();
+      const parsed = g.kickoff ? Date.parse(g.kickoff) : NaN;
+      if (Number.isFinite(parsed)) return parsed;
+      if (typeof g.createdAt === 'number' && Number.isFinite(g.createdAt)) return g.createdAt;
+      if (g.createdAt?.toDate) return g.createdAt.toDate().getTime();
+      return null;
+    }
 
     // Collections
     const weekId = () => {
@@ -300,9 +310,24 @@
         console.error('Error loading picks', e);
       }
 
-      unsubGames = onSnapshot(query(colGames(currentWeekId), orderBy('kickoffTs', 'asc')), (snap)=>{
-        const games = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+      const gamesRef = colGames(currentWeekId);
+      const handleSnap = (snap)=>{
+        const games = snap.docs.map(d=>({ id:d.id, ...d.data() }))
+          .sort((a,b)=>{
+            const ka = kickoffMs(a);
+            const kb = kickoffMs(b);
+            if (ka === kb) return 0;
+            if (ka === null) return 1;
+            if (kb === null) return -1;
+            return ka - kb;
+          });
         renderGames(games);
+      };
+      const fallbackSubscribe = ()=> onSnapshot(gamesRef, handleSnap);
+      unsubGames = onSnapshot(query(gamesRef, orderBy('kickoffTs', 'asc')), handleSnap, (err)=>{
+        console.warn('kickoffTs ordering failed — using unsorted listener', err);
+        unsubGames();
+        unsubGames = fallbackSubscribe();
       });
     }
 
@@ -338,9 +363,7 @@
 
         // Kickoff
         const tdKick=document.createElement('td');
-        const koMs = typeof g.kickoffTs === 'number'
-          ? g.kickoffTs
-          : (g.kickoff?.toDate ? g.kickoff.toDate().getTime() : (g.kickoff ? Date.parse(g.kickoff) : null));
+        const koMs = kickoffMs(g);
         const koDate = Number.isFinite(koMs) ? new Date(koMs) : null;
         tdKick.textContent = koDate ? koDate.toLocaleString() : '—';
         tr.appendChild(tdKick);
