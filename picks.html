@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v10.5)</title>
+  <title>NFL Picks • User (v10.6)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -48,7 +48,7 @@
   <header>
     <div class="row" style="align-items:center; gap:10px">
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
-      <span class="pill version">v10.5</span>
+      <span class="pill version">v10.6</span>
     </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
@@ -107,7 +107,8 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
     import {
       getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-      createUserWithEmailAndPassword, signOut
+      createUserWithEmailAndPassword, signOut,
+      setPersistence, browserLocalPersistence
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
     import {
       getFirestore, collection, doc, setDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp
@@ -128,6 +129,12 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db   = getFirestore(app);
+
+    // Ensure sign-in works even in private/incognito modes by preferring local persistence
+    await setPersistence(auth, browserLocalPersistence).catch((e)=>{
+      console.warn('persistence error', e);
+      setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+    });
 
     // ---- DOM
     const who = document.getElementById('who');
@@ -158,12 +165,15 @@
     async function doSignIn(evt){
       evt?.preventDefault();
       setAuthMessage('Signing in…');
+      btnSignIn.disabled = btnCreate.disabled = true;
       try {
         await signInWithEmailAndPassword(auth, inEmail.value.trim(), inPass.value);
         setAuthMessage('Signed in.');
       } catch (e) {
         console.error(e);
         setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+      } finally {
+        btnSignIn.disabled = btnCreate.disabled = false;
       }
     }
 
@@ -171,6 +181,7 @@
       evt?.preventDefault();
       const email = inEmail.value.trim();
       setAuthMessage('Creating account…');
+      btnSignIn.disabled = btnCreate.disabled = true;
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, inPass.value);
         await setDoc(doc(db,'users',cred.user.uid), {
@@ -192,6 +203,8 @@
         } else {
           setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
         }
+      } finally {
+        btnSignIn.disabled = btnCreate.disabled = false;
       }
     }
 
@@ -305,8 +318,8 @@
           o.textContent=v||'— select —';
           select.appendChild(o);
         });
-        const chosen = myPicks.get(g.id) || '';
-        select.value = chosen || '';
+        const mine = myPicks.get(g.id) || '';
+        select.value = mine || '';
         const locked = koDate.getTime() <= Date.now();
         select.disabled = locked;
         select.title = locked ? 'Locked at kickoff' : '';
@@ -327,27 +340,28 @@
         const tdStatus=document.createElement('td');
         if (g.winner) {
           total++;
-          const mine = myPicks.get(g.id);
+          select.disabled = true;
+          resultTag.style.display='inline-flex';
           if (mine){
             if (mine === g.winner) {
-              tdStatus.textContent = 'Your pick won';
+              tdStatus.textContent = 'Correct';
               tdStatus.className = 'status-ok';
               correct++;
               tdPick.classList.add('pick-win');
-              resultTag.style.display='inline-flex';
               resultTag.innerHTML = `<span class="emoji">🏆</span><span>You picked ${mine} · Winner: ${g.winner}</span>`;
             } else {
-              tdStatus.textContent = 'Your pick lost';
+              tdStatus.textContent = 'Wrong';
               tdStatus.className = 'status-bad';
               tdPick.classList.add('pick-loss');
-              resultTag.style.display='inline-flex';
               resultTag.innerHTML = `<span class="emoji">⚔️</span><span>You picked ${mine} · Winner: ${g.winner}</span>`;
             }
           } else {
-            tdStatus.textContent = '— (no pick)';
+            tdStatus.textContent = 'No pick';
+            resultTag.innerHTML = `<span class="emoji">🏆</span><span>Winner: ${g.winner}</span>`;
           }
         } else {
-          tdStatus.textContent = select.disabled ? 'Locked (awaiting winner)' : 'Open';
+          tdStatus.textContent = mine ? `Your pick: ${mine}` : 'Your pick: —';
+          if (select.disabled) tdStatus.textContent += ' (locked)';
         }
         tr.appendChild(tdStatus);
 
