@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family NFL Picks (v3.2)</title>
+  <title>Family NFL Picks (v3.3)</title>
 <style>
   :root{
     --bg:#0f1115; --fg:#e7e7e7; --muted:#9aa0a6; --card:#171a21; --accent:#6ea8ff; --bad:#ff6b6b; --border:#252a33;
@@ -149,7 +149,7 @@
   <div class="bar">
     <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Family NFL Picks</h1>
-        <span class="pill version-pill">v3.2</span>
+        <span class="pill version-pill">v3.3</span>
     </div>
     <a href="overall.html" class="pill">View Overall Leaderboard →</a>
     <!-- Admin Grid link -->
@@ -215,26 +215,26 @@
 </div>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
   import {
     getAuth, onAuthStateChanged, signInWithEmailAndPassword,
     createUserWithEmailAndPassword, signOut,
     setPersistence, browserLocalPersistence
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
   import {
     initializeFirestore, getFirestore, doc, setDoc, getDoc, getDocs, Timestamp,
     onSnapshot, collection, addDoc, query, orderBy, collectionGroup, deleteDoc
-  } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+  } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
   // --- Firebase config ---
   const firebaseConfig = {
-    apiKey: "AIzaSyCBgBR2n4e5ObgQOpRNRQQtZ7AhKLBr080",
-    authDomain: "nfl-picks-b83c2.firebaseapp.com",
-    projectId: "nfl-picks-b83c2",
-    storageBucket: "nfl-picks-b83c2.appspot.com",
-    messagingSenderId: "802058909501",
-    appId: "1:802058909501:web:bb935c188891934de07754",
-    measurementId: "G-MSJHYZ4VG2"
+    apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
+    authDomain: "nflpicks2025-51202.firebaseapp.com",
+    projectId: "nflpicks2025-51202",
+    storageBucket: "nflpicks2025-51202.appspot.com",
+    messagingSenderId: "125791202188",
+    appId: "1:125791202188:web:903f4c74dc84a5b69604a9",
+    measurementId: "G-289KXJQZGG"
   };
 
   // --- Init ---
