@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v8.7)</title>
+  <title>Admin Importer — Games Only (v8.8)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.7</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.8</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -179,6 +179,8 @@
     function impSetStatus(m){ byId('impStatus').textContent = m||""; }
     function impLog(m){ var L=byId('log'); L.textContent += (m+"\\n"); L.scrollTop=L.scrollHeight; }
     function impProg(v){ var el=byId('impProg'); el.style.display='block'; el.value=v; }
+    function impProgDone(){ var el=byId('impProg'); el.style.display='none'; el.value=0; }
+    function impClearLog(){ var L=byId('log'); L.textContent=''; }
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
@@ -474,6 +476,18 @@
       }
       return { headers:headers, games:games, rows:rows, hasPick: hasPick };
     }
+    async function commitChunks(actions, chunkSize, label){
+      const total = actions.length;
+      let done = 0;
+      for(let i=0;i<actions.length;i+=chunkSize){
+        const b = db.batch();
+        actions.slice(i, i+chunkSize).forEach(function(fn){ fn(b); });
+        await b.commit();
+        done += Math.min(chunkSize, total - i);
+        if(label) impLog(label + ' chunk committed (' + done + '/' + total + ')');
+        impProg(Math.min(90, Math.round((done/Math.max(total,1))*70)+20));
+      }
+    }
     function renderPreview(p){
       byId('previewInfo').textContent = "Games: " + p.games.length + (p.hasPick ? " • picks included" : "");
       const tbl = byId('previewTable'); tbl.innerHTML="";
@@ -499,6 +513,7 @@
       }
     }
     async function runImport(){
+      impClearLog();
       try{
         if(!state.parsed){
           const f = byId('impFile').files[0];
@@ -516,9 +531,11 @@
           impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
           const qs = await db.collection('weeks').doc(wid).collection('games').get();
           if(!dry){
-            const bDel = db.batch();
-            qs.forEach(function(d){ bDel.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); });
-            await bDel.commit();
+            const deleteFns = [];
+            qs.forEach(function(d){ deleteFns.push(function(b){ b.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); }); });
+            if(deleteFns.length){
+              await commitChunks(deleteFns, 400, 'Delete');
+            }
           }
           impLog("Deleted " + qs.size + " game(s)");
         }
@@ -526,13 +543,16 @@
 
         let picksPayload = {};
         if(!dry){
-          const bGames = db.batch();
-          state.parsed.games.forEach(function(g){
-            const ref = db.collection('weeks').doc(wid).collection('games').doc();
-            const kickoffTs = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
-            bGames.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso, kickoffTs, createdAt: Date.now() });
+          const writeFns = state.parsed.games.map(function(g){
+            return function(b){
+              const ref = db.collection('weeks').doc(wid).collection('games').doc();
+              const kickoffTs = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
+              b.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso, kickoffTs, createdAt: Date.now() });
+            };
           });
-          await bGames.commit();
+          if(writeFns.length){
+            await commitChunks(writeFns, 400, 'Write');
+          }
         }
         impLog("Wrote " + state.parsed.games.length + " game(s)");
 
@@ -547,10 +567,13 @@
         }
         impProg(100);
         impSetStatus("✅ Import complete.");
-        alert("Import complete!\\n\\nGames added: " + state.parsed.games.length + (dry ? "\\n\\n(DRY-RUN: no writes performed)" : ""));
+        impLog('Import complete.');
+        alert("Import complete!\n\nGames added: " + state.parsed.games.length + (dry ? "\n\n(DRY-RUN: no writes performed)" : ""));
         if(wid === state.weekId) await loadWeek();
       }catch(err){
         console.error(err); impSetStatus("❌ Import failed. See details below."); impLog(err && err.message ? err.message : String(err)); alert("Import failed: " + (err && err.message ? err.message : String(err)));
+      } finally {
+        impProgDone();
       }
     }
     function generateTemplate(){
