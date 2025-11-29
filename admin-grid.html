@@ -219,7 +219,7 @@
       ADMIN_UIDS.includes(user.uid) ||
       ADMIN_EMAILS.includes((user.email || "").toLowerCase());
 
-    el("#userTag").textContent = `${user.email} • uid:${user.uid}`;
+    el("#userTag").textContent = `${user.email || "(no email)"}`;
     el("#adminTag").style.display = isAdmin ? "" : "none";
 
     if (!isAdmin) {
