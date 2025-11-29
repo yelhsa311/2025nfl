@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v8.6)</title>
+  <title>Admin Importer — Games Only (v8.7)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.6</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.7</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -205,11 +205,33 @@
 
     const ADMIN_UIDS = ["j8D0AzlAgmTHSaDcBHwQbpMT9Is1"];
     const ADMIN_EMAILS = ["yelhsa311@gmail.com"]; // allow by email fallback
+    let allowlist = { uids:[...ADMIN_UIDS], emails:[...ADMIN_EMAILS] };
+
+    async function refreshAllowlist(){
+      try{
+        const doc = await db.collection('meta').doc('adminAllowlist').get();
+        if(doc.exists){
+          const data = doc.data() || {};
+          const uids = Array.isArray(data.uids) ? data.uids : [];
+          const emails = Array.isArray(data.emails) ? data.emails.map(e => (e||"").toLowerCase()) : [];
+          allowlist = {
+            uids: Array.from(new Set([...ADMIN_UIDS, ...uids])),
+            emails: Array.from(new Set([...ADMIN_EMAILS, ...emails]))
+          };
+        }else{
+          allowlist = { uids:[...ADMIN_UIDS], emails:[...ADMIN_EMAILS] };
+        }
+      }catch(err){
+        console.warn('Failed to load admin allowlist; using fallback.', err);
+        allowlist = { uids:[...ADMIN_UIDS], emails:[...ADMIN_EMAILS] };
+      }
+    }
 
     // ===== Auth gate =====
     auth.onAuthStateChanged(async function(user){
       if(!user){ location.replace('./picks.html'); return; }
-      const isAdmin = ADMIN_UIDS.indexOf(user.uid) !== -1 || ADMIN_EMAILS.includes((user.email||"").toLowerCase());
+      await refreshAllowlist();
+      const isAdmin = allowlist.uids.indexOf(user.uid) !== -1 || allowlist.emails.includes((user.email||"").toLowerCase());
       if(!isAdmin){
         const msg = "Admins only. Add this UID to ADMIN_UIDS or email to ADMIN_EMAILS.";
         alert(msg + "\n\nUID: " + user.uid + "\nEmail: " + (user.email||"(no email)"));
