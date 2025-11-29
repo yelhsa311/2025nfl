@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NFL Picks — Admin Grid (v2.1)</title>
+<title>NFL Picks — Admin Grid (v2.2)</title>
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
@@ -37,7 +37,7 @@
   <div class="row" style="justify-content:space-between">
     <div class="row" style="align-items:center; gap:10px">
       <h1 style="margin:.2rem 0">Admin Grid</h1>
-      <span class="pill version-pill">v2.1</span>
+      <span class="pill version-pill">v2.2</span>
     </div>
     <div class="row">
       <a class="pill" href="picks.html">← Back to App</a> <a href='./admin-import.html' class='import-link'>📥 Go to Importer</a>
@@ -193,7 +193,17 @@
   const byId = id => document.getElementById(id);
   const log  = (...a)=>{ el("#log").textContent += a.join(" ") + "\n"; };
   const setStatus = t => { el("#status").textContent = t || ""; };
-  const fmtTime = ts => ts ? new Date(ts).toLocaleString([], { month:"short", day:"2-digit", hour:"numeric", minute:"2-digit" }) : "";
+  const kickoffMs = (val, fallback)=>{
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+    if (val && typeof val.toDate === "function") return val.toDate().getTime();
+    const parsed = val ? Date.parse(val) : NaN;
+    if (Number.isFinite(parsed)) return parsed;
+    return typeof fallback === "number" && Number.isFinite(fallback) ? fallback : null;
+  };
+  const fmtTime = ts => {
+    const ms = kickoffMs(ts);
+    return ms ? new Date(ms).toLocaleString([], { month:"short", day:"2-digit", hour:"numeric", minute:"2-digit" }) : "";
+  };
   const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
   const parseEmails = raw => (raw||"").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   const uidFromEmail = email => slug(email).slice(0,64);
@@ -424,18 +434,35 @@
       byId("orphanCount").textContent = "—";
 
       // games: order by kickoffTs (or createdAt as fallback)
-      const gq = query(collection(db,"weeks",state.weekId,"games"), orderBy("kickoffTs","asc"));
-      const snap = await getDocs(gq);
+      const gamesRef = collection(db,"weeks",state.weekId,"games");
+      const snap = await (async ()=>{
+        try{
+          return await getDocs(query(gamesRef, orderBy("kickoffTs","asc")));
+        }catch(err){
+          console.warn("kickoffTs order failed; falling back to unsorted", err);
+          log("⚠️ kickoffTs sort unavailable — showing unsorted games.");
+          return await getDocs(gamesRef);
+        }
+      })();
+
       snap.forEach(d=>{
         const v=d.data();
+        const ko = kickoffMs(v.kickoffTs ?? v.kickoff, v.createdAt);
         state.games.push({
           id:d.id,
           day:v.day||"",
           home:v.home||"",
           away:v.away||"",
-          kickoffTs: typeof v.kickoffTs==="number" ? v.kickoffTs : null,
-          winner:v.winner||""
+          kickoffTs: ko,
+          winner:v.winner||"",
+          createdAt: v.createdAt || null
         });
+      });
+
+      state.games.sort((a,b)=>{
+        const ka = kickoffMs(a.kickoffTs, a.createdAt) ?? Number.MAX_SAFE_INTEGER;
+        const kb = kickoffMs(b.kickoffTs, b.createdAt) ?? Number.MAX_SAFE_INTEGER;
+        return ka - kb;
       });
 
       // ensure users list
