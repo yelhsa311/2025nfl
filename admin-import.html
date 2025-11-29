@@ -197,6 +197,7 @@
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
     // Legacy guard: older pick-import code referenced pickUid/hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
     var pickUid = null;
+    var pickUser = null;
     const hasPick = false;
     const hasPickUser = false;
     for(let i=1;i<=22;i++){ const o=document.createElement('option'); o.value=String(i); o.textContent=i; byId('impWeek').appendChild(o); }
@@ -550,13 +551,19 @@
         const season = Number(byId('impSeason').value||2025);
         const wn = Number(byId('impWeek').value||1);
         const wid = weekId(season, wn);
+        const games = Array.isArray(state.parsed.games) ? state.parsed.games : [];
+        if(!games.length){
+          impSetStatus('❌ No games found in CSV; import cancelled.');
+          alert('Import cancelled: no games were parsed from the CSV.');
+          return;
+        }
         impSetStatus("Importing…"); impLog("Import start for " + wid); impProg(1);
 
         await deleteExistingGames(wid);
         impProg(35);
 
         let picksPayload = {};
-        const writeFns = state.parsed.games.map(function(g){
+        const writeFns = games.map(function(g){
           return function(b){
             const ref = db.collection('weeks').doc(wid).collection('games').doc();
             const kickoffTsRaw = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
