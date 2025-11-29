@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v10.6)</title>
+  <title>NFL Picks • User (v11)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -48,7 +48,7 @@
   <header>
     <div class="row" style="align-items:center; gap:10px">
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
-      <span class="pill version">v10.6</span>
+      <span class="pill version">v11</span>
     </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
@@ -59,15 +59,15 @@
   <main>
     <section class="card stack">
       <h2>Your Account</h2>
-      <div id="authForm" class="stack">
+      <form id="authForm" class="stack">
         <input id="inEmail" type="email" placeholder="email@example.com" />
         <input id="inPass" type="password" placeholder="password" />
         <div class="row">
-          <button id="btnSignIn"  class="primary" type="button">Sign in</button>
+          <button id="btnSignIn"  class="primary" type="submit">Sign in</button>
           <button id="btnCreate"  class="ghost"   type="button">Create account</button>
         </div>
         <div id="authMsg" class="hint"></div>
-      </div>
+      </form>
 
       <div class="sep"></div>
 
@@ -209,7 +209,7 @@
     }
 
     // Wire up buttons and expose globals so inline handlers continue to work
-    btnSignIn.addEventListener('click', doSignIn);
+    authForm.addEventListener('submit', doSignIn);
     btnCreate.addEventListener('click', doCreate);
     window._signin = doSignIn;
     window._create = doCreate;
