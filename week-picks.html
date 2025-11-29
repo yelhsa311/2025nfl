@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Everyone's Picks (v1.5)</title>
+  <title>Everyone's Picks (v1.6)</title>
   <style>
     :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--good:#86f5b2;--bad:#ff8c8c;--info:#c7b6ff;}
     *{box-sizing:border-box}
@@ -37,7 +37,7 @@
     <header>
       <div class="row" style="align-items:center; gap:8px">
         <h1 style="margin:0">Everyone's Picks</h1>
-        <span class="pill version-pill">v1.5</span>
+        <span class="pill version-pill">v1.6</span>
       </div>
       <div class="row">
         <a class="pill" href="picks.html">← Back to App</a>
@@ -80,7 +80,8 @@
       createUserWithEmailAndPassword
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
     import {
-      getFirestore, collection, getDocs, orderBy, query, doc, getDoc, setDoc, serverTimestamp
+      getFirestore, collection, collectionGroup, getDocs, orderBy, query, where,
+      doc, getDoc, setDoc, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -122,6 +123,16 @@
       week: "01",
       games: [],
       picks: [] // { userId, name, email, picks }
+    };
+
+    const weekId = () => `${state.season}-Week-${state.week}`;
+
+    const kickoffMs = (val) => {
+      if (!val && val !== 0) return null;
+      if (typeof val === "number" && Number.isFinite(val)) return val;
+      if (val?.toDate) return val.toDate().getTime();
+      const parsed = Date.parse(val);
+      return Number.isFinite(parsed) ? parsed : null;
     };
 
     const lc = (s) => String(s || "").toLowerCase();
@@ -232,26 +243,49 @@
 
     async function loadGames(){
       state.games = [];
+      const id = weekId();
+      if (!id) { setStatus("Enter a valid season and week."); return; }
       try{
-        const q = query(collection(db, "seasons", state.season, "weeks", state.week, "games"), orderBy("kickoff", "asc"));
-        const snap = await getDocs(q);
-        snap.forEach(d => {
+        const gamesRef = collection(db, "weeks", id, "games");
+        let snap;
+        try {
+          snap = await getDocs(query(gamesRef, orderBy("kickoffTs", "asc")));
+        } catch (err) {
+          console.warn("kickoffTs sort failed; falling back", err);
+          snap = await getDocs(gamesRef);
+        }
+
+        const games = snap.docs.map(d => {
           const v = d.data();
-          state.games.push({
+          const kickoffTs = kickoffMs(v.kickoffTs ?? v.kickoff ?? v.kickoffTs);
+          return {
             id: d.id,
             home: v.home || "",
             away: v.away || "",
             winner: v.winner || "",
-            kickoff: v.kickoff?.toMillis ? v.kickoff.toMillis() : (v.kickoff || v.kickoffTs || null)
-          });
+            kickoff: kickoffTs ?? v.kickoffTs ?? null
+          };
         });
+
+        games.sort((a,b)=>{
+          const ka = kickoffMs(a.kickoff);
+          const kb = kickoffMs(b.kickoff);
+          if (ka === kb) return 0;
+          if (ka === null) return 1;
+          if (kb === null) return -1;
+          return ka - kb;
+        });
+
+        state.games = games;
       }catch(e){ setStatus("Game load error: " + (e.message||e)); }
     }
 
     async function loadPicks(){
       state.picks = [];
+      const id = weekId();
+      if (!id) return;
       try{
-        const snap = await getDocs(collection(db, "seasons", state.season, "weeks", state.week, "picks"));
+        const snap = await getDocs(query(collectionGroup(db, "weeks"), where("weekId", "==", id)));
         const byUser = new Map();
         snap.forEach(d => {
           const data = d.data() || {};
