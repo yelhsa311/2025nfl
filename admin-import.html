@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v8.9)</title>
+  <title>Admin Importer — Games Only (v20.0)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.9</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.0</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -121,9 +121,8 @@
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:center">
           <label>Season <input id="impSeason" type="number" min="2000" max="2100" value="2025" style="width:120px"></label>
           <label>Week # <select id="impWeek"></select></label>
-          <label><input id="impReplace" type="checkbox"> Replace games for this week (delete existing first)</label>
-          <label><input id="impDry" type="checkbox"> Dry-run (no writes)</label>
           <label>CSV File <input id="impFile" type="file" accept=".csv"></label>
+          <div class="role">Step 1: choose a CSV. Step 2: Preview or Import. Import will delete any existing games for the selected week before writing the new ones.</div>
           <div class="role">CSV columns: day,kickoff_date,kickoff_time,home,away,winner (kickoff_local also accepted)</div>
           <div><button id="genTplBtn" type="button">Generate template</button></div>
           <div class="sp"></div>
@@ -181,6 +180,18 @@
     function impProg(v){ var el=byId('impProg'); el.style.display='block'; el.value=v; }
     function impProgDone(){ var el=byId('impProg'); el.style.display='none'; el.value=0; }
     function impClearLog(){ var L=byId('log'); L.textContent=''; }
+    function hidePreview(){
+      byId('previewCard').style.display = 'none';
+      byId('previewTable').innerHTML = '';
+      byId('previewInfo').textContent = '';
+    }
+    function resetImportUi(message){
+      state.parsed = null;
+      hidePreview();
+      impClearLog();
+      impProgDone();
+      impSetStatus(message || '');
+    }
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null };
@@ -253,6 +264,7 @@
     byId('saveChangesBtn').addEventListener('click', saveChanges);
     byId('openImportBtn').addEventListener('click', function(){ byId('importModal').classList.add('open'); setTimeout(function(){ byId('impFile').focus(); }, 0); });
     byId('closeImportBtn').addEventListener('click', function(){ byId('importModal').classList.remove('open'); });
+    byId('impFile').addEventListener('change', function(){ resetImportUi('File selected — choose Preview or Import.'); });
     byId('genTplBtn').addEventListener('click', generateTemplate);
     byId('impPreviewBtn').addEventListener('click', previewCsv);
     byId('impRunBtn').addEventListener('click', runImport);
@@ -265,6 +277,7 @@
       drop.addEventListener('drop', function(e){
         var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if(!f) return;
+        resetImportUi('File dropped — parsing…');
         parseCsvFile(f).then(function(p){
           state.parsed = p; if(p) renderPreview(p);
         }).catch(function(err){
@@ -488,6 +501,19 @@
         impProg(Math.min(90, Math.round((done/Math.max(total,1))*70)+20));
       }
     }
+    async function deleteExistingGames(wid){
+      impSetStatus("Deleting existing games…");
+      const qs = await db.collection('weeks').doc(wid).collection('games').get();
+      if(!qs.size){
+        impLog('No existing games to delete for ' + wid);
+        return 0;
+      }
+      const deleteFns = [];
+      qs.forEach(function(d){ deleteFns.push(function(b){ b.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); }); });
+      await commitChunks(deleteFns, 400, 'Delete');
+      impLog('Deleted ' + qs.size + ' existing game(s)');
+      return qs.size;
+    }
     function renderPreview(p){
       byId('previewInfo').textContent = "Games: " + p.games.length + (p.hasPick ? " • picks included" : "");
       const tbl = byId('previewTable'); tbl.innerHTML="";
@@ -515,49 +541,35 @@
     async function runImport(){
       impClearLog();
       try{
+        const f = byId('impFile').files[0];
+        if(!f){ alert('Pick a CSV file first.'); return; }
         if(!state.parsed){
-          const f = byId('impFile').files[0];
           state.parsed = await parseCsvFile(f);
           if(!state.parsed) return;
         }
         const season = Number(byId('impSeason').value||2025);
         const wn = Number(byId('impWeek').value||1);
         const wid = weekId(season, wn);
-        const replace = byId('impReplace').checked;
-        const dry = byId('impDry').checked;
         impSetStatus("Importing…"); impLog("Import start for " + wid); impProg(1);
 
-        if(replace){
-          impSetStatus("Deleting existing games…"); impLog("Delete pass starting");
-          const qs = await db.collection('weeks').doc(wid).collection('games').get();
-          if(!dry){
-            const deleteFns = [];
-            qs.forEach(function(d){ deleteFns.push(function(b){ b.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); }); });
-            if(deleteFns.length){
-              await commitChunks(deleteFns, 400, 'Delete');
-            }
-          }
-          impLog("Deleted " + qs.size + " game(s)");
-        }
-        impProg(15);
+        await deleteExistingGames(wid);
+        impProg(35);
 
         let picksPayload = {};
-        if(!dry){
-          const writeFns = state.parsed.games.map(function(g){
-            return function(b){
-              const ref = db.collection('weeks').doc(wid).collection('games').doc();
-              const kickoffTsRaw = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
-              const kickoffTs = Number.isFinite(kickoffTsRaw) ? kickoffTsRaw : null;
-              b.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso, kickoffTs, createdAt: Date.now() });
-            };
-          });
-          if(writeFns.length){
-            await commitChunks(writeFns, 400, 'Write');
-          }
+        const writeFns = state.parsed.games.map(function(g){
+          return function(b){
+            const ref = db.collection('weeks').doc(wid).collection('games').doc();
+            const kickoffTsRaw = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
+            const kickoffTs = Number.isFinite(kickoffTsRaw) ? kickoffTsRaw : null;
+            b.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso, kickoffTs, createdAt: Date.now() });
+          };
+        });
+        if(writeFns.length){
+          await commitChunks(writeFns, 400, 'Write');
         }
         impLog("Wrote " + state.parsed.games.length + " game(s)");
 
-        if(!dry && pickUid && Object.keys(picksPayload).length){
+        if(pickUid && Object.keys(picksPayload).length){
           await db.collection('picks').doc(pickUid).collection('weeks').doc(wid).set({
             email: pickUser,
             weekId: wid,
@@ -569,7 +581,7 @@
         impProg(100);
         impSetStatus("✅ Import complete.");
         impLog('Import complete.');
-        alert("Import complete!\n\nGames added: " + state.parsed.games.length + (dry ? "\n\n(DRY-RUN: no writes performed)" : ""));
+        alert("Import complete!\n\nGames added: " + state.parsed.games.length + "\n\nExisting games for this week were deleted before import.");
         if(wid === state.weekId) await loadWeek();
       }catch(err){
         console.error(err); impSetStatus("❌ Import failed. See details below."); impLog(err && err.message ? err.message : String(err)); alert("Import failed: " + (err && err.message ? err.message : String(err)));
