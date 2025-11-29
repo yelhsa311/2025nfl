@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v12)</title>
+  <title>NFL Picks • User (v13)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -48,7 +48,7 @@
   <header>
     <div class="row" style="align-items:center; gap:10px">
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
-      <span class="pill version">v12</span>
+      <span class="pill version">v13</span>
     </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
@@ -112,7 +112,7 @@
       setPersistence, browserLocalPersistence
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
     import {
-      getFirestore, collection, doc, setDoc, getDocs, onSnapshot, query, orderBy, serverTimestamp
+      getFirestore, collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, serverTimestamp
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
     // ---- Your Firebase config
@@ -159,8 +159,12 @@
     function fmtPct(c,t){ return t ? (Math.round((c/t)*1000)/10).toFixed(1)+'%' : '—'; }
 
     // Collections
-    const colGames = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'games');
-    const colPicks = (season, week) => collection(db, 'seasons', season, 'weeks', week, 'picks');
+    const weekId = () => {
+      const season = (inSeason.value || '').trim();
+      const week = String(selWeek.value || '').padStart(2, '0');
+      return season && week ? `${season}-Week-${week}` : '';
+    };
+    const colGames = (id) => collection(db, 'weeks', id, 'games');
 
     function setAuthMessage(text){ authMsg.textContent = text || ''; }
 
@@ -280,35 +284,39 @@
 
     async function attachGameListener(){
       if (!currentUser) return;
-      const season=(inSeason.value||'').trim();
-      const week=(selWeek.value||'').trim();
-      if (!season || !week) return;
+      const currentWeekId = weekId();
+      if (!currentWeekId) return;
 
       detachGameListener();
 
       // Load user's existing picks for this week
       myPicks = new Map();
-      (await getDocs(colPicks(season, week))).forEach(d=>{
-        const v=d.data();
-        if (v.userId === currentUser.uid) myPicks.set(v.gameId, v.pick);
-      });
+      try {
+        const pickSnap = await getDoc(doc(db, 'picks', currentUser.uid, 'weeks', currentWeekId));
+        const picks = pickSnap.exists() ? (pickSnap.data().picks || {}) : {};
+        Object.entries(picks).forEach(([gid, pick]) => myPicks.set(gid, pick));
+      } catch (e) {
+        console.error('Error loading picks', e);
+      }
 
-      unsubGames = onSnapshot(query(colGames(season, week), orderBy('kickoff','asc')), (snap)=>{
+      unsubGames = onSnapshot(query(colGames(currentWeekId), orderBy('kickoffTs', 'asc')), (snap)=>{
         const games = snap.docs.map(d=>({ id:d.id, ...d.data() }));
         renderGames(games);
       });
     }
 
     async function savePick(gameId, label){
-      const season = String(inSeason.value);
-      const week   = String(selWeek.value);
-      await setDoc(doc(db,'seasons',season,'weeks',week,'picks', `${currentUser?.uid}_${gameId}`), {
-        userId: currentUser?.uid,
-        gameId,
-        pick: label,
+      const currentWeekId = weekId();
+      if (!currentWeekId) return;
+
+      await setDoc(doc(db, 'picks', currentUser.uid, 'weeks', currentWeekId), {
+        email: currentUser.email || '',
+        weekId: currentWeekId,
+        [`picks.${gameId}`]: label,
         updatedAt: ts(),
         createdAt: ts()
       }, { merge:true });
+
       myPicks.set(gameId, label); // optimistic update
     }
 
@@ -329,8 +337,11 @@
 
         // Kickoff
         const tdKick=document.createElement('td');
-        const koDate = g.kickoff?.toDate ? g.kickoff.toDate() : new Date(g.kickoff);
-        tdKick.textContent = koDate.toLocaleString();
+        const koMs = typeof g.kickoffTs === 'number'
+          ? g.kickoffTs
+          : (g.kickoff?.toDate ? g.kickoff.toDate().getTime() : (g.kickoff ? Date.parse(g.kickoff) : null));
+        const koDate = Number.isFinite(koMs) ? new Date(koMs) : null;
+        tdKick.textContent = koDate ? koDate.toLocaleString() : '—';
         tr.appendChild(tdKick);
 
         // --- Your Pick (dropdown, Home/Away only — no TIE) ---
@@ -345,7 +356,7 @@
         });
         const mine = myPicks.get(g.id) || '';
         select.value = mine || '';
-        const locked = koDate.getTime() <= Date.now();
+        const locked = koDate ? koDate.getTime() <= Date.now() : false;
         select.disabled = locked;
         select.title = locked ? 'Locked at kickoff' : '';
         select.onchange = async ()=>{
