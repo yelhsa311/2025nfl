@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>NFL Picks • User (v11)</title>
+  <title>NFL Picks • User (v12)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
@@ -48,7 +48,7 @@
   <header>
     <div class="row" style="align-items:center; gap:10px">
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
-      <span class="pill version">v11</span>
+      <span class="pill version">v12</span>
     </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
@@ -65,6 +65,7 @@
         <div class="row">
           <button id="btnSignIn"  class="primary" type="submit">Sign in</button>
           <button id="btnCreate"  class="ghost"   type="button">Create account</button>
+          <button id="btnReset"   class="ghost"   type="button">Forgot password</button>
         </div>
         <div id="authMsg" class="hint"></div>
       </form>
@@ -107,7 +108,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
     import {
       getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-      createUserWithEmailAndPassword, signOut,
+      createUserWithEmailAndPassword, sendPasswordResetEmail, signOut,
       setPersistence, browserLocalPersistence
     } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
     import {
@@ -145,6 +146,7 @@
     const btnReload = document.getElementById('btnReload');
     const btnSignIn = document.getElementById('btnSignIn');
     const btnCreate = document.getElementById('btnCreate');
+    const btnReset = document.getElementById('btnReset');
     const authMsg = document.getElementById('authMsg');
     const selWeek = document.getElementById('selWeek');
     const inSeason = document.getElementById('inSeason');
@@ -165,7 +167,7 @@
     async function doSignIn(evt){
       evt?.preventDefault();
       setAuthMessage('Signing in…');
-      btnSignIn.disabled = btnCreate.disabled = true;
+      btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = true;
       try {
         await signInWithEmailAndPassword(auth, inEmail.value.trim(), inPass.value);
         setAuthMessage('Signed in.');
@@ -173,7 +175,7 @@
         console.error(e);
         setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
       } finally {
-        btnSignIn.disabled = btnCreate.disabled = false;
+        btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = false;
       }
     }
 
@@ -181,7 +183,7 @@
       evt?.preventDefault();
       const email = inEmail.value.trim();
       setAuthMessage('Creating account…');
-      btnSignIn.disabled = btnCreate.disabled = true;
+      btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = true;
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, inPass.value);
         await setDoc(doc(db,'users',cred.user.uid), {
@@ -204,15 +206,38 @@
           setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
         }
       } finally {
-        btnSignIn.disabled = btnCreate.disabled = false;
+        btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = false;
+      }
+    }
+
+    async function doReset(evt){
+      evt?.preventDefault();
+      const email = inEmail.value.trim();
+      if (!email){
+        setAuthMessage('Enter your email to get a reset link.');
+        inEmail.focus();
+        return;
+      }
+      setAuthMessage('Sending reset email…');
+      btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = true;
+      try {
+        await sendPasswordResetEmail(auth, email);
+        setAuthMessage('Reset email sent. Check your inbox for a link to set a new password.');
+      } catch (e) {
+        console.error(e);
+        setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+      } finally {
+        btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = false;
       }
     }
 
     // Wire up buttons and expose globals so inline handlers continue to work
     authForm.addEventListener('submit', doSignIn);
     btnCreate.addEventListener('click', doCreate);
+    btnReset.addEventListener('click', doReset);
     window._signin = doSignIn;
     window._create = doCreate;
+    window._reset = doReset;
 
     // ---- Auth state
     let unsubGames = null;
