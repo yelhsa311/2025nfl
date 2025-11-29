@@ -53,7 +53,7 @@
 </head>
 <body>
   <header>
-    <a href="./index.html" id="backLink">← Back to App</a>
+    <a href="./picks.html" id="backLink">← Back to App</a>
     <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v8.4</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
@@ -207,8 +207,8 @@
 
     // ===== Auth gate =====
     auth.onAuthStateChanged(async function(user){
-      if(!user){ location.replace('./index.html'); return; }
-      if(ADMIN_UIDS.indexOf(user.uid)===-1){ alert("Admins only."); await auth.signOut(); location.replace('./index.html'); return; }
+      if(!user){ location.replace('./picks.html'); return; }
+      if(ADMIN_UIDS.indexOf(user.uid)===-1){ alert("Admins only."); await auth.signOut(); location.replace('./picks.html'); return; }
       byId('userTag').textContent = user.email || "";
       loadWeek();
     });
