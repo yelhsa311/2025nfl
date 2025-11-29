@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v20.3)</title>
+  <title>Admin Importer — Games Only (v20.4)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.3</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.4</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -163,7 +163,7 @@
     const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const uidFromEmail = email => slug(email).slice(0,64);
     function withTimeout(promise, label, timeoutMs){
-      const ms = Math.max(1000, timeoutMs||15000);
+      const ms = Math.max(1000, timeoutMs||60000);
       const tag = label || 'Operation';
       let timer;
       return Promise.race([
