@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NFL Picks — Admin Grid (v2.2)</title>
+<title>NFL Picks — Admin Grid (v2.3)</title>
 <style>
   :root{--bg:#0f1115;--fg:#e7e7e7;--muted:#9aa0a6;--card:#171a21;--border:#252a33;--accent:#6ea8ff;--warn:#ffd56e;--good:#86f5b2;--danger:#ff8c8c}
   *{box-sizing:border-box}
@@ -37,7 +37,7 @@
   <div class="row" style="justify-content:space-between">
     <div class="row" style="align-items:center; gap:10px">
       <h1 style="margin:.2rem 0">Admin Grid</h1>
-      <span class="pill version-pill">v2.2</span>
+      <span class="pill version-pill">v2.3</span>
     </div>
     <div class="row">
       <a class="pill" href="picks.html">← Back to App</a> <a href='./admin-import.html' class='import-link'>📥 Go to Importer</a>
@@ -207,6 +207,7 @@
   const slug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
   const parseEmails = raw => (raw||"").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   const uidFromEmail = email => slug(email).slice(0,64);
+  const newId = ()=> crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2,10);
 
   const state = {
     weekId: null,
@@ -216,6 +217,67 @@
     dirty: { games: new Set(), picks: new Set() },
     orphans: new Map()         // email -> [gameId,...] where gameId not in games
   };
+
+  function normalizeGames(arr){
+    return (arr || []).map(raw => {
+      const kickoffTs = kickoffMs(raw.kickoffTs ?? raw.kickoff, raw.createdAt);
+      return {
+        id: raw.id || newId(),
+        day: raw.day || "",
+        home: raw.home || "",
+        away: raw.away || "",
+        winner: raw.winner || "",
+        kickoff: raw.kickoff || null,
+        kickoffTs: Number.isFinite(kickoffTs) ? kickoffTs : null,
+        createdAt: raw.createdAt || null
+      };
+    }).sort((a,b)=>{
+      const ka = kickoffMs(a.kickoffTs, a.createdAt) ?? Number.MAX_SAFE_INTEGER;
+      const kb = kickoffMs(b.kickoffTs, b.createdAt) ?? Number.MAX_SAFE_INTEGER;
+      return ka - kb;
+    });
+  }
+
+  async function fetchWeekGames(weekId){
+    try{
+      const wkRef = doc(db, "weeks", weekId);
+      const wkSnap = await getDoc(wkRef);
+      if (wkSnap.exists()){
+        const data = wkSnap.data() || {};
+        if (Array.isArray(data.games)){
+          return { games: normalizeGames(data.games), source: "doc" };
+        }
+      }
+    }catch(err){ console.warn("Week doc load failed; falling back to subcollection", err); }
+
+    // Fallback to legacy per-game documents
+    const gamesRef = collection(db,"weeks",weekId,"games");
+    const snap = await (async ()=>{
+      try{
+        return await getDocs(query(gamesRef, orderBy("kickoffTs","asc")));
+      }catch(err){
+        console.warn("kickoffTs order failed; falling back to unsorted", err);
+        log("⚠️ kickoffTs sort unavailable — showing unsorted games.");
+        return await getDocs(gamesRef);
+      }
+    })();
+    const legacyGames = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    return { games: normalizeGames(legacyGames), source: "collection" };
+  }
+
+  async function persistWeekGames(games){
+    const payload = (games || []).map(g => ({
+      id: g.id || newId(),
+      day: g.day || "",
+      home: g.home || "",
+      away: g.away || "",
+      winner: g.winner || "",
+      kickoff: g.kickoff || null,
+      kickoffTs: g.kickoffTs ?? null,
+      createdAt: g.createdAt || null
+    }));
+    await setDoc(doc(db, "weeks", state.weekId), { games: payload, updatedAt: Date.now() }, { merge: true });
+  }
 
   // --- Auth flow ---
   onAuthStateChanged(auth, (user)=>{
@@ -373,17 +435,9 @@
     if(!confirm(`Delete ALL games for ${state.weekId}?\n\nThis will also prune related picks.`)) return;
     try{
       setStatus("Deleting all games for week…");
-      const snap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-      if (snap.empty){ setStatus("No games to delete for this week."); return; }
-
-      const ids = snap.docs.map(d => d.id);
-      let batch = writeBatch(db), opCount = 0;
-      for (const d of snap.docs){
-        batch.delete(d.ref); opCount++;
-        if (opCount >= 450){ await batch.commit(); batch = writeBatch(db); opCount = 0; }
-      }
-      if (opCount > 0) await batch.commit();
-
+      const ids = state.games.map(g=>g.id);
+      state.games = [];
+      await persistWeekGames(state.games);
       await pruneGamesFromAllPicks(state.weekId, ids);
       setStatus(`Deleted ${ids.length} game${ids.length===1?'':'s'} and pruned picks.`);
       await loadWeek();
@@ -408,9 +462,9 @@
 
       if (!home || !away){ alert("Please enter both Home and Away teams."); return; }
 
-      await addDoc(collection(db, "weeks", state.weekId, "games"), {
-        day, home, away, createdAt: Date.now(), ...(kickoffTs ? { kickoffTs } : {})
-      });
+      const g = { id:newId(), day, home, away, createdAt: Date.now(), ...(kickoffTs ? { kickoffTs } : {}) };
+      state.games.push(g);
+      await persistWeekGames(state.games);
 
       byId("addHome").value=""; byId("addAway").value=""; byId("addKick").value="";
       setStatus("Game added.");
@@ -433,37 +487,12 @@
       state.orphans.clear();
       byId("orphanCount").textContent = "—";
 
-      // games: order by kickoffTs (or createdAt as fallback)
-      const gamesRef = collection(db,"weeks",state.weekId,"games");
-      const snap = await (async ()=>{
-        try{
-          return await getDocs(query(gamesRef, orderBy("kickoffTs","asc")));
-        }catch(err){
-          console.warn("kickoffTs order failed; falling back to unsorted", err);
-          log("⚠️ kickoffTs sort unavailable — showing unsorted games.");
-          return await getDocs(gamesRef);
-        }
-      })();
-
-      snap.forEach(d=>{
-        const v=d.data();
-        const ko = kickoffMs(v.kickoffTs ?? v.kickoff, v.createdAt);
-        state.games.push({
-          id:d.id,
-          day:v.day||"",
-          home:v.home||"",
-          away:v.away||"",
-          kickoffTs: ko,
-          winner:v.winner||"",
-          createdAt: v.createdAt || null
-        });
-      });
-
-      state.games.sort((a,b)=>{
-        const ka = kickoffMs(a.kickoffTs, a.createdAt) ?? Number.MAX_SAFE_INTEGER;
-        const kb = kickoffMs(b.kickoffTs, b.createdAt) ?? Number.MAX_SAFE_INTEGER;
-        return ka - kb;
-      });
+      const { games, source } = await fetchWeekGames(state.weekId);
+      state.games = games;
+      if (source === "collection" && games.length){
+        await persistWeekGames(games);
+        log(`Migrated ${games.length} game(s) from subcollection to week document.`);
+      }
 
       // ensure users list
       const globalUsers = JSON.parse(localStorage.getItem("adminGridUsers:GLOBAL") || "[]");
@@ -577,8 +606,8 @@
       btn.addEventListener("click", async () => {
         const gid = btn.dataset.del;
         if (!confirm("Delete this game?")) return;
-
-        await deleteDoc(doc(db, "weeks", state.weekId, "games", gid));
+        state.games = state.games.filter(g => g.id !== gid);
+        await persistWeekGames(state.games);
         await pruneGamesFromAllPicks(state.weekId, [gid]);   // prune stale picks
         setStatus(`Deleted ${gid}`);
         await loadWeek();
@@ -619,15 +648,8 @@
   async function saveAll(){
     try{
       setStatus("Saving…");
-      // winners (batch)
-      const batch = writeBatch(db);
       const gameIds = [...state.dirty.games];
-      for (const gid of gameIds){
-        const g = state.games.find(x => x.id === gid);
-        if (!g) continue;
-        batch.set(doc(db,"weeks",state.weekId,"games",gid), { winner: g.winner || null, updatedAt: Date.now() }, { merge:true });
-      }
-      await batch.commit();
+      await persistWeekGames(state.games);
 
       // picks (per user)
       let pickDocs=0;
@@ -692,8 +714,7 @@
     state.orphans.clear();
 
     // Build set of valid gameIds for this week
-    const gamesSnap = await getDocs(collection(db, "weeks", state.weekId, "games"));
-    const valid = new Set(gamesSnap.docs.map(d => d.id));
+    const valid = new Set(state.games.map(g => g.id));
 
     // Walk all picks docs for this week
     const q = query(collectionGroup(db, "weeks"));
