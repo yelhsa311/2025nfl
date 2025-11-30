@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v21.0)</title>
+  <title>Admin Importer — Games Only (v21.1)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.0</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.1</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -212,7 +212,7 @@
     }
 
     // ===== State =====
-    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null, importing:false };
+    const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null, importing:false, importFile:null };
     const newId = ()=> crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2,10);
 
     function normalizeGames(arr){
@@ -321,7 +321,7 @@
     byId('saveChangesBtn').addEventListener('click', saveChanges);
     byId('openImportBtn').addEventListener('click', function(){ byId('importModal').classList.add('open'); setTimeout(function(){ byId('impFile').focus(); }, 0); });
     byId('closeImportBtn').addEventListener('click', function(){ byId('importModal').classList.remove('open'); });
-    byId('impFile').addEventListener('change', function(){ resetImportUi('File selected — choose Preview or Import.'); });
+    byId('impFile').addEventListener('change', function(){ state.importFile = byId('impFile').files[0] || null; resetImportUi('File selected — choose Preview or Import.'); });
     byId('genTplBtn').addEventListener('click', generateTemplate);
     byId('impPreviewBtn').addEventListener('click', previewCsv);
     byId('impRunBtn').addEventListener('click', runImport);
@@ -339,6 +339,7 @@
         var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if(!f) return;
         resetImportUi('File dropped — parsing…');
+        state.importFile = f;
         parseCsvFile(f).then(function(p){
           state.parsed = p; if(p) renderPreview(p);
         }).catch(function(err){
@@ -627,7 +628,7 @@
     async function previewCsv(){
       try{
         if(state.importing){ impSetStatus('Import already running. Please wait.'); return; }
-        const f = byId('impFile').files[0];
+        const f = state.importFile || byId('impFile').files[0];
         state.parsed = await parseCsvFile(f);
         if(state.parsed){
           renderPreview(state.parsed);
@@ -648,7 +649,7 @@
       setImportBusy(true);
       impClearLog();
       try{
-        const f = byId('impFile').files[0];
+        const f = state.importFile || byId('impFile').files[0];
         if(!f){ alert('Pick a CSV file first.'); return; }
         if(!state.parsed){
           state.parsed = await parseCsvFile(f);
