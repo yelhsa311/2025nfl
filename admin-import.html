@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v21.6)</title>
+  <title>Admin Importer — Games Only (v21.7)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.6</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.7</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -291,7 +291,7 @@
       });
 
       try{
-        await batch.commit();
+        await withTimeout(batch.commit(), "Firestore batch commit", commitTimeoutMs);
         impLog('Firestore SDK write (games collection batch) succeeded.');
       }catch(err){
         console.error('Firestore SDK write (games collection batch) failed', err);
@@ -716,7 +716,7 @@ const deleteChunkSize = 100;
         deleted++;
       });
       try{
-        await batch.commit();
+        await withTimeout(batch.commit(), "Firestore batch commit", commitTimeoutMs);
         impLog('Deleted ' + deleted + ' game(s) for ' + wid + ' from "games" collection.');
       }catch(err){
         console.error('Failed to delete existing games for ' + wid, err);
