@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NFL Picks • Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f1220; --card:#171a2b; --muted:#8fa0ff; --text:#e9ecff; --accent:#4c73ff; --danger:#ff6b6b; --ok:#31c48d; --border:#2a2f47 }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:#0e1120;position:sticky;top:0;z-index:3;gap:10px}
+    h1{margin:0;font-size:18px;letter-spacing:.4px}
+    .muted{color:#aeb6ff9c}
+    .badge{font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:#0e1330;color:var(--text);text-decoration:none}
+    main{padding:16px;display:grid;gap:16px;grid-template-columns:360px 1fr}
+    @media (max-width:1000px){main{grid-template-columns:1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+    .card h2{margin:0 0 8px;font-size:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .stack{display:grid;gap:10px}
+    .grid{display:grid;gap:8px}
+    .grid.cols-2{grid-template-columns:1fr 1fr}
+    input,select,button{background:#0e1226;color:#e9ecff;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+    button{cursor:pointer}
+    button.primary{background:#4c73ff;border-color:#2b4bd8}
+    button.ghost{background:transparent}
+    .hint{font-size:12px;color:#aeb6ff9c}
+    .sep{height:1px;background:var(--border);margin:8px 0}
+    table{width:100%;border-collapse:collapse;background:#0e1226;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    th{background:#0b0f1f;color:#b7c0ff}
+    tbody tr:hover{background:#0f1430}
+    .pill{padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#0d1130;color:#c7d0ff}
+    .version{background:#0d1a36;border-color:#2d3a55;color:#9cc7ff;padding:5px 10px;font-size:12px}
+    .winner{font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid var(--border);background:#101542;color:#c7d0ff;margin-left:8px}
+    .status{min-height:16px}
+    .table-actions{display:flex;gap:8px}
+    .danger{border-color:#a23c3c;color:#ffb0b0}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="row" style="gap:10px">
+      <h1>🏈 NFL Picks <span class="muted">· Admin</span></h1>
+      <span class="pill version">v1.0</span>
+    </div>
+    <div class="row" style="gap:10px">
+      <a class="badge" href="picks.html">User page</a>
+      <span id="who" class="badge">signed out</span>
+      <button id="btnSignOut" class="ghost" style="display:none" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card stack">
+      <h2>Admin Access</h2>
+      <form id="authForm" class="stack">
+        <input id="inEmail" type="email" placeholder="email@example.com" />
+        <input id="inPass" type="password" placeholder="password" />
+        <div class="row">
+          <button id="btnSignIn"  class="primary" type="submit">Sign in</button>
+          <button id="btnCreate"  class="ghost"   type="button">Create account</button>
+          <button id="btnReset"   class="ghost"   type="button">Forgot password</button>
+        </div>
+        <div id="authMsg" class="hint"></div>
+      </form>
+
+      <div id="blocked" class="stack" style="display:none">
+        <div class="pill" style="background:#241012;color:#ffb0b0;border-color:#a23c3c">Admin role required</div>
+        <p class="hint">You are signed in but are not an admin. Ask an administrator to add <code>isAdmin: true</code> to your user document.</p>
+      </div>
+    </section>
+
+    <section id="adminPanel" class="card stack" style="display:none">
+      <div class="row" style="align-items:center;justify-content:space-between">
+        <h2 style="margin:0">Manage weekly matchups</h2>
+        <div class="hint" id="panelHint"></div>
+      </div>
+      <div class="grid cols-2">
+        <select id="selWeek"></select>
+        <input id="inSeason" placeholder="Season (e.g. 2025)" />
+      </div>
+      <div class="row">
+        <button id="btnLoad" class="ghost" type="button">Load week</button>
+        <button id="btnAddGame" class="ghost" type="button">Add matchup</button>
+        <button id="btnSave" class="primary" type="button">Save week</button>
+      </div>
+      <p class="hint">Provide the kickoff time and select the winner for completed games. Empty rows will be ignored.</p>
+      <table id="tblAdmin">
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th>Matchup</th>
+            <th style="width:220px">Kickoff (local)</th>
+            <th style="width:160px">Winner</th>
+            <th style="width:120px">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div id="saveStatus" class="hint status"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import {
+      getAuth, onAuthStateChanged, signInWithEmailAndPassword,
+      createUserWithEmailAndPassword, sendPasswordResetEmail, signOut,
+      setPersistence, browserLocalPersistence
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import {
+      getFirestore, doc, setDoc, getDoc, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDC2DnD4I4nekKWnCkDD9dTwQZN4tj3g0w",
+      authDomain: "nflpicks2025-51202.firebaseapp.com",
+      projectId: "nflpicks2025-51202",
+      storageBucket: "nflpicks2025-51202.appspot.com",
+      messagingSenderId: "125791202188",
+      appId: "1:125791202188:web:903f4c74dc84a5b69604a9",
+      measurementId: "G-289KXJQZGG"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db   = getFirestore(app);
+    await setPersistence(auth, browserLocalPersistence).catch((e)=>{
+      console.warn('persistence error', e);
+      setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+    });
+
+    const who = document.getElementById('who');
+    const btnSignOut = document.getElementById('btnSignOut');
+    const authForm = document.getElementById('authForm');
+    const inEmail = document.getElementById('inEmail');
+    const inPass  = document.getElementById('inPass');
+    const btnSignIn = document.getElementById('btnSignIn');
+    const btnCreate = document.getElementById('btnCreate');
+    const btnReset = document.getElementById('btnReset');
+    const authMsg = document.getElementById('authMsg');
+    const selWeek = document.getElementById('selWeek');
+    const inSeason = document.getElementById('inSeason');
+    const tblBody = document.querySelector('#tblAdmin tbody');
+    const btnLoad = document.getElementById('btnLoad');
+    const btnSave = document.getElementById('btnSave');
+    const btnAddGame = document.getElementById('btnAddGame');
+    const adminPanel = document.getElementById('adminPanel');
+    const blocked = document.getElementById('blocked');
+    const panelHint = document.getElementById('panelHint');
+    const saveStatus = document.getElementById('saveStatus');
+
+    const ts = () => serverTimestamp();
+    const weekId = () => {
+      const season = (inSeason.value || '').trim();
+      const week = String(selWeek.value || '').padStart(2, '0');
+      return season && week ? `${season}-Week-${week}` : '';
+    };
+
+    function setAuthMessage(text){ authMsg.textContent = text || ''; }
+    function setStatus(text){ saveStatus.textContent = text || ''; }
+    function clearTable(){ while (tblBody.firstChild) tblBody.removeChild(tblBody.firstChild); }
+
+    function kickoffMs(g){
+      if (!g) return null;
+      if (typeof g.kickoffTs === 'number' && Number.isFinite(g.kickoffTs)) return g.kickoffTs;
+      if (g.kickoff?.toDate) return g.kickoff.toDate().getTime();
+      const parsed = g.kickoff ? Date.parse(g.kickoff) : NaN;
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    const normalizeGames = (arr)=> (arr||[]).map(g=>({
+      id: g.id || Math.random().toString(36).slice(2,10),
+      home: g.home || '',
+      away: g.away || '',
+      winner: g.winner || '',
+      kickoff: g.kickoff || '',
+      kickoffTs: kickoffMs(g)
+    })).sort((a,b)=>{
+      const ka = kickoffMs(a);
+      const kb = kickoffMs(b);
+      if (ka === kb) return 0;
+      if (ka === null) return 1;
+      if (kb === null) return -1;
+      return ka - kb;
+    });
+
+    function formatInputValue(ms){
+      if (!Number.isFinite(ms)) return '';
+      const iso = new Date(ms).toISOString();
+      return iso.slice(0,16);
+    }
+
+    function updateWinnerOptions(row){
+      const home = row.querySelector('.home').value;
+      const away = row.querySelector('.away').value;
+      const sel = row.querySelector('.winner');
+      const prev = sel.value;
+      sel.innerHTML = '';
+      ['', home, away].forEach((v)=>{
+        const opt=document.createElement('option'); opt.value=v; opt.textContent=v||'—'; sel.appendChild(opt);
+      });
+      if ([home, away].includes(prev)) sel.value = prev;
+    }
+
+    function addRow(data={}){
+      const tr=document.createElement('tr');
+      const idx=document.createElement('td'); idx.textContent = String(tblBody.children.length + 1); tr.appendChild(idx);
+
+      const tdMatch=document.createElement('td');
+      const homeIn=document.createElement('input'); homeIn.className='home'; homeIn.placeholder='Home'; homeIn.value=data.home||'';
+      const awayIn=document.createElement('input'); awayIn.className='away'; awayIn.placeholder='Away'; awayIn.value=data.away||'';
+      tdMatch.append(awayIn, document.createTextNode(' @ '), homeIn);
+      tr.appendChild(tdMatch);
+
+      const tdKick=document.createElement('td');
+      const ko=document.createElement('input'); ko.className='kickoff'; ko.type='datetime-local';
+      ko.value = formatInputValue(kickoffMs(data));
+      tdKick.appendChild(ko);
+      tr.appendChild(tdKick);
+
+      const tdWinner=document.createElement('td');
+      const winnerSel=document.createElement('select'); winnerSel.className='winner';
+      tdWinner.appendChild(winnerSel);
+      tr.appendChild(tdWinner);
+
+      const tdActions=document.createElement('td');
+      tdActions.className='table-actions';
+      const btnDelete=document.createElement('button'); btnDelete.type='button'; btnDelete.className='ghost danger'; btnDelete.textContent='Remove';
+      btnDelete.onclick=()=>{ tr.remove(); refreshRowNumbers(); };
+      tdActions.appendChild(btnDelete);
+      tr.appendChild(tdActions);
+
+      [homeIn, awayIn].forEach(inp=> inp.addEventListener('input', ()=> updateWinnerOptions(tr)));
+      updateWinnerOptions(tr);
+      if (data.winner) winnerSel.value = data.winner;
+
+      tr.dataset.rowId = data.id || Math.random().toString(36).slice(2,10);
+      tblBody.appendChild(tr);
+    }
+
+    function refreshRowNumbers(){
+      Array.from(tblBody.children).forEach((tr, idx)=>{ tr.firstChild.textContent = String(idx+1); });
+    }
+
+    function renderGames(games){
+      clearTable();
+      games.forEach(g=> addRow(g));
+      if (!games.length) addRow();
+    }
+
+    function collectGames(){
+      const rows = Array.from(tblBody.children);
+      return rows
+        .map((tr)=>{
+          const home = tr.querySelector('.home').value.trim();
+          const away = tr.querySelector('.away').value.trim();
+          const winner = tr.querySelector('.winner').value.trim();
+          const kickoffVal = tr.querySelector('.kickoff').value;
+          const kickoffTs = kickoffVal ? Date.parse(kickoffVal) : null;
+          if (!home || !away) return null; // ignore empties
+          return {
+            id: tr.dataset.rowId || Math.random().toString(36).slice(2,10),
+            home, away,
+            winner: winner && (winner === home || winner === away) ? winner : '',
+            kickoff: kickoffVal ? new Date(kickoffTs).toISOString() : '',
+            kickoffTs: Number.isFinite(kickoffTs) ? kickoffTs : null
+          };
+        })
+        .filter(Boolean);
+    }
+
+    async function loadWeek(){
+      if (!isAdminUser) { setStatus('Admin access required.'); return; }
+      const id = weekId();
+      if (!id) { setStatus('Enter a season and week to load.'); return; }
+      setStatus('Loading…');
+      try {
+        const snap = await getDoc(doc(db, 'weeks', id));
+        const games = snap.exists() ? normalizeGames((snap.data()||{}).games || []) : [];
+        renderGames(games);
+        setStatus(snap.exists() ? `Loaded ${games.length} game(s) for ${id}.` : `No data yet for ${id}; start adding matchups.`);
+      } catch (e) {
+        console.error('Load error', e);
+        setStatus(`${e.code || 'error'}: ${e.message || e}`);
+      }
+    }
+
+    async function saveWeek(){
+      if (!isAdminUser) { setStatus('Admin access required.'); return; }
+      const id = weekId();
+      if (!id) { setStatus('Enter a season and week before saving.'); return; }
+      const games = collectGames();
+      setStatus('Saving…');
+      try {
+        await setDoc(doc(db, 'weeks', id), {
+          games,
+          weekId: id,
+          season: (inSeason.value||'').trim(),
+          week: selWeek.value,
+          updatedAt: ts(),
+          createdAt: ts()
+        }, { merge:true });
+        setStatus(`Saved ${games.length} game(s) to ${id}.`);
+      } catch (e) {
+        console.error('Save error', e);
+        setStatus(`${e.code || 'error'}: ${e.message || e}`);
+      }
+    }
+
+    async function doSignIn(evt){
+      evt?.preventDefault();
+      setAuthMessage('Signing in…');
+      btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = true;
+      try {
+        await signInWithEmailAndPassword(auth, inEmail.value.trim(), inPass.value);
+        setAuthMessage('Signed in.');
+      } catch (e) {
+        console.error(e);
+        setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+      } finally {
+        btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = false;
+      }
+    }
+
+    async function doCreate(evt){
+      evt?.preventDefault();
+      const email = inEmail.value.trim();
+      setAuthMessage('Creating account…');
+      btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = true;
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, inPass.value);
+        await setDoc(doc(db,'users',cred.user.uid), {
+          displayName: email.split('@')[0],
+          createdAt: ts(),
+          isAdmin: false
+        }, { merge:true });
+        setAuthMessage('Account created.');
+      } catch (e) {
+        console.error(e);
+        setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+      } finally {
+        btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = false;
+      }
+    }
+
+    async function doReset(evt){
+      evt?.preventDefault();
+      const email = inEmail.value.trim();
+      if (!email){
+        setAuthMessage('Enter your email to get a reset link.');
+        inEmail.focus();
+        return;
+      }
+      setAuthMessage('Sending reset email…');
+      btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = true;
+      try {
+        await sendPasswordResetEmail(auth, email);
+        setAuthMessage('Reset email sent.');
+      } catch (e) {
+        console.error(e);
+        setAuthMessage(`${e.code || 'error'}: ${e.message || e}`);
+      } finally {
+        btnSignIn.disabled = btnCreate.disabled = btnReset.disabled = false;
+      }
+    }
+
+    authForm.addEventListener('submit', doSignIn);
+    btnCreate.addEventListener('click', doCreate);
+    btnReset.addEventListener('click', doReset);
+
+    for (let w=1; w<=18; w++){
+      const v=String(w).padStart(2,'0');
+      const opt=document.createElement('option'); opt.value=v; opt.textContent='Week '+w; selWeek.appendChild(opt);
+    }
+    inSeason.value = new Date().getFullYear();
+    selWeek.value = '01';
+
+    btnLoad.onclick = loadWeek;
+    btnSave.onclick = saveWeek;
+    btnAddGame.onclick = ()=> addRow();
+
+    let currentUser = null;
+    let isAdminUser = false;
+
+    async function fetchIsAdmin(uid){
+      try {
+        const snap = await getDoc(doc(db,'users',uid));
+        return !!((snap.data()||{}).isAdmin);
+      } catch (e) {
+        console.warn('Unable to load admin flag', e);
+        return false;
+      }
+    }
+
+    function updateVisibility(){
+      adminPanel.style.display = isAdminUser ? 'grid' : 'none';
+      blocked.style.display = currentUser && !isAdminUser ? 'grid' : 'none';
+    }
+
+    onAuthStateChanged(auth, async (u)=>{
+      currentUser = u || null;
+      if (u){
+        who.textContent = u.email || u.uid;
+        authForm.style.display='none';
+        btnSignOut.style.display='inline-block';
+        await setDoc(doc(db,'users',u.uid), { displayName: (u.email||'').split('@')[0], updatedAt: ts() }, { merge:true });
+        isAdminUser = await fetchIsAdmin(u.uid);
+        updateVisibility();
+        panelHint.textContent = isAdminUser ? 'You can add matchups, kickoff times, and winners for each week.' : '';
+        if (isAdminUser) loadWeek();
+      } else {
+        who.textContent = 'signed out';
+        authForm.style.display='grid';
+        btnSignOut.style.display='none';
+        isAdminUser = false;
+        updateVisibility();
+        clearTable();
+        setStatus('');
+      }
+    });
+
+    btnSignOut.onclick = ()=> signOut(auth);
+  </script>
+</body>
+</html>

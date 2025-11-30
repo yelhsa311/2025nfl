@@ -50,6 +50,9 @@
       <h1>🏈 NFL Picks <span class="muted">· User</span></h1>
       <span class="pill version">v1.001</span>
     </div>
+    <div class="row" style="align-items:center; gap:10px">
+      <a id="adminLink" class="badge" style="display:none" href="admin.html">Admin</a>
+    </div>
     <div id="authArea" class="row">
       <span id="who" class="badge">signed out</span>
       <button id="btnSignOut" class="ghost" style="display:none" type="button">Sign out</button>
@@ -152,6 +155,7 @@
     const inSeason = document.getElementById('inSeason');
     const tblGamesBody = document.querySelector('#tblGames tbody');
     const weekSummary = document.getElementById('weekSummary');
+    const adminLink = document.getElementById('adminLink');
 
     // ---- Helpers
     const ts = () => serverTimestamp();
@@ -274,6 +278,19 @@
     let unsubGames = null;
     let currentUser = null;
     let myPicks = new Map(); // gameId -> pick
+    let isAdminUser = false;
+
+    const setAdminLinkVisible = (show)=>{ adminLink.style.display = show ? 'inline-flex' : 'none'; };
+
+    async function fetchIsAdmin(uid){
+      try {
+        const snap = await getDoc(doc(db,'users',uid));
+        return !!((snap.data()||{}).isAdmin);
+      } catch (e) {
+        console.warn('Unable to load admin flag', e);
+        return false;
+      }
+    }
 
     onAuthStateChanged(auth, async (u)=>{
       currentUser = u || null;
@@ -283,11 +300,15 @@
         btnSignOut.style.display='inline-block';
         // ensure /users doc exists (optional nicety)
         await setDoc(doc(db,'users',u.uid), { displayName: (u.email||'').split('@')[0], updatedAt: ts() }, { merge:true });
+        isAdminUser = await fetchIsAdmin(u.uid);
+        setAdminLinkVisible(isAdminUser);
         attachGameListener();
       } else {
         who.textContent = 'signed out';
         authForm.style.display='grid';
         btnSignOut.style.display='none';
+        isAdminUser = false;
+        setAdminLinkVisible(false);
         detachGameListener();
         clearTable(tblGamesBody);
         weekSummary.textContent = '';
