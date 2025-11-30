@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v20.7)</title>
+  <title>Admin Importer — Games Only (v21.0)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.7</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.0</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -213,6 +213,41 @@
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null, importing:false };
+    const newId = ()=> crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2,10);
+
+    function normalizeGames(arr){
+      return (arr || []).map(g => {
+        const kickoffTs = g.kickoffTs ?? (g.kickoff ? new Date(g.kickoff).getTime() : null);
+        return {
+          id: g.id || newId(),
+          day: g.day || "",
+          home: g.home || "",
+          away: g.away || "",
+          winner: g.winner || "",
+          kickoff: g.kickoff || null,
+          kickoffTs: Number.isFinite(kickoffTs) ? kickoffTs : null,
+          createdAt: g.createdAt || null
+        };
+      }).sort(function(a,b){
+        const ka = a.kickoffTs ?? Number.MAX_SAFE_INTEGER;
+        const kb = b.kickoffTs ?? Number.MAX_SAFE_INTEGER;
+        return ka - kb;
+      });
+    }
+
+    async function persistWeekGames(wid, games){
+      const payload = (games||[]).map(function(g){ return {
+        id: g.id || newId(),
+        day: g.day || "",
+        home: g.home || "",
+        away: g.away || "",
+        winner: g.winner || "",
+        kickoff: g.kickoff || null,
+        kickoffTs: g.kickoffTs ?? null,
+        createdAt: g.createdAt || null
+      };});
+      await db.collection('weeks').doc(wid).set({ games: payload, updatedAt: Date.now() }, { merge:true });
+    }
     const deleteChunkSize = 100;
     const writeChunkSize = 1;
     const commitTimeoutMs = 120000;
@@ -317,13 +352,35 @@
     async function loadWeek(){
       try{
         setStatus("Loading…"); byId('wid').textContent = state.weekId;
-        const snap = await db.collection('weeks').doc(state.weekId).collection('games').orderBy('kickoffTs').get();
         state.games = [];
-        snap.forEach(function(d){
-          var g = d.data();
-          state.games.push({ id:d.id, day:g.day||"", kickoff:g.kickoff||"", home:g.home||"", away:g.away||"", winner:g.winner||"" });
-        });
-        state.games.sort(function(a,b){ return new Date(a.kickoff)-new Date(b.kickoff); });
+
+        const wkRef = db.collection('weeks').doc(state.weekId);
+        try{
+          const wkSnap = await wkRef.get();
+          if (wkSnap.exists){
+            const data = wkSnap.data() || {};
+            if (Array.isArray(data.games)){
+              state.games = normalizeGames(data.games);
+            }
+          }
+        }catch(err){ console.warn('Week doc load failed; falling back to legacy collection', err); }
+
+        if (!state.games.length){
+          try{
+            const snap = await wkRef.collection('games').orderBy('kickoffTs').get();
+            const legacy = [];
+            snap.forEach(function(d){
+              var g = d.data();
+              legacy.push({ id:d.id, day:g.day||"", kickoff:g.kickoff||"", home:g.home||"", away:g.away||"", winner:g.winner||"", kickoffTs: g.kickoffTs || null, createdAt: g.createdAt || null });
+            });
+            state.games = normalizeGames(legacy);
+            if (state.games.length){
+              await persistWeekGames(state.weekId, state.games);
+              impLog('Migrated legacy game documents into week doc.');
+            }
+          }catch(err){ console.error(err); }
+        }
+
         renderGrid();
         byId('docCount').textContent = String(state.games.length);
         const list = state.games.slice(0,10).map(function(x){ return "• " + x.home + " vs " + x.away + " (" + x.day + ")"; }).join('<br>');
@@ -353,7 +410,8 @@
         + '<div class="right"><button class="btn-danger" type="button" data-action="delete">Delete</button></div>';
       node.querySelector('[data-action="delete"]').addEventListener('click', async function(){
         if(!confirm("Delete this game?")) return;
-        await db.collection('weeks').doc(state.weekId).collection('games').doc(game.id).delete();
+        state.games = state.games.filter(function(g){ return g.id !== game.id; });
+        await persistWeekGames(state.weekId, state.games);
         await loadWeek();
       });
       return node;
@@ -361,23 +419,25 @@
 
     async function saveChanges(){
       var rows = Array.prototype.slice.call(document.querySelectorAll('.trow'));
-      let count = 0;
-      for(const r of rows){
+      const map = new Map(state.games.map(function(g){ return [g.id, g]; }));
+      rows.forEach(function(r){
         const id = r.getAttribute('data-id');
+        const kickoffVal = r.querySelector('[data-field="kickoff"]').value;
+        const kickoffIso = kickoffVal ? new Date(kickoffVal).toISOString() : "";
         const payload = {
+          id: id || newId(),
           day: r.querySelector('[data-field="day"]').value.trim(),
-          kickoff: r.querySelector('[data-field="kickoff"]').value ? new Date(r.querySelector('[data-field="kickoff"]').value).toISOString() : "",
+          kickoff: kickoffIso,
+          kickoffTs: kickoffIso ? new Date(kickoffIso).getTime() : null,
           home: r.querySelector('[data-field="home"]').value.trim(),
           away: r.querySelector('[data-field="away"]').value.trim(),
           winner: r.querySelector('[data-field="winner"]').value || ""
         };
-        await db.collection('weeks').doc(state.weekId).collection('games').doc(id).update({
-          ...payload,
-          kickoffTs: payload.kickoff ? new Date(payload.kickoff).getTime() : null
-        });
-        count++;
-      }
-      setStatus("Saved " + count + " game(s).");
+        map.set(payload.id, { ...map.get(payload.id), ...payload });
+      });
+      state.games = normalizeGames(Array.from(map.values()));
+      await persistWeekGames(state.weekId, state.games);
+      setStatus("Saved " + state.games.length + " game(s).");
     }
 
     async function addGame(){
@@ -387,8 +447,10 @@
       const kick = byId('kickoffInput').value;
       if(!home || !away || !kick){ alert("Fill Home, Away, Kickoff."); return; }
       const kickoffIso = new Date(kick).toISOString();
-      const payload = { weekId: state.weekId, day, home, away, kickoff: kickoffIso, kickoffTs: new Date(kickoffIso).getTime(), winner: "" };
-      await db.collection('weeks').doc(state.weekId).collection('games').add(payload);
+      const payload = { id:newId(), weekId: state.weekId, day, home, away, kickoff: kickoffIso, kickoffTs: new Date(kickoffIso).getTime(), winner: "", createdAt: Date.now() };
+      state.games.push(payload);
+      state.games = normalizeGames(state.games);
+      await persistWeekGames(state.weekId, state.games);
       byId('homeInput').value=""; byId('awayInput').value=""; byId('kickoffInput').value="";
       await loadWeek();
     }
@@ -548,17 +610,10 @@
       }
     }
     async function deleteExistingGames(wid){
-      impSetStatus("Deleting existing games…");
-      const qs = await db.collection('weeks').doc(wid).collection('games').get();
-      if(!qs.size){
-        impLog('No existing games to delete for ' + wid);
-        return 0;
-      }
-      const deleteFns = [];
-      qs.forEach(function(d){ deleteFns.push(function(b){ b.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); }); });
-      await commitChunks(deleteFns, deleteChunkSize, 'Delete', commitTimeoutMs);
-      impLog('Deleted ' + qs.size + ' existing game(s)');
-      return qs.size;
+      // Legacy helper retained for compatibility; now replaced by a single doc write.
+      await persistWeekGames(wid, []);
+      impLog('Cleared games in week doc for ' + wid);
+      return 0;
     }
     function renderPreview(p){
       byId('previewInfo').textContent = "Games: " + p.games.length + (p.hasPick ? " • picks included" : "");
@@ -613,34 +668,28 @@
         await deleteExistingGames(wid);
         impProg(35);
 
-        let picksPayload = {};
-        const writeFns = games.map(function(g){
-          return function(b){
-            const ref = db.collection('weeks').doc(wid).collection('games').doc();
-            const kickoffTsRaw = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
-            const kickoffTs = Number.isFinite(kickoffTsRaw) ? kickoffTsRaw : null;
-            b.set(ref, { weekId: wid, day: g.day, home: g.home, away: g.away, winner: g.winner||"", kickoff: g.kickoffIso, kickoffTs, createdAt: Date.now() });
+        const withIds = games.map(function(g){
+          const kickoffTsRaw = g.kickoffIso ? new Date(g.kickoffIso).getTime() : null;
+          const kickoffTs = Number.isFinite(kickoffTsRaw) ? kickoffTsRaw : null;
+          return {
+            id: g.id || newId(),
+            day: g.day,
+            home: g.home,
+            away: g.away,
+            winner: g.winner||"",
+            kickoff: g.kickoffIso || null,
+            kickoffTs,
+            createdAt: Date.now(),
+            weekId: wid
           };
         });
-        if(writeFns.length){
-          impSetStatus('Writing new games…');
-          await commitChunks(writeFns, writeChunkSize, 'Write', commitTimeoutMs);
-        }
-        impLog("Wrote " + state.parsed.games.length + " game(s)");
 
-        if(pickUid && Object.keys(picksPayload).length){
-          await db.collection('picks').doc(pickUid).collection('weeks').doc(wid).set({
-            email: pickUser,
-            weekId: wid,
-            picks: picksPayload,
-            updatedAt: Date.now()
-          }, { merge:true });
-          impLog("Stored picks for " + pickUser + " (" + Object.keys(picksPayload).length + " games)");
-        }
+        await persistWeekGames(wid, withIds);
+        impLog("Wrote " + withIds.length + " game(s) to week doc");
         impProg(100);
         impSetStatus("✅ Import complete.");
         impLog('Import complete.');
-        alert("Import complete!\n\nGames added: " + state.parsed.games.length + "\n\nExisting games for this week were deleted before import.");
+        alert("Import complete!\n\nGames added: " + withIds.length + "\n\nExisting games for this week were cleared before import.");
         if(wid === state.weekId) await loadWeek();
       }catch(err){
         console.error(err); impSetStatus("❌ Import failed. See details below."); impLog(err && err.message ? err.message : String(err)); alert("Import failed: " + (err && err.message ? err.message : String(err)));

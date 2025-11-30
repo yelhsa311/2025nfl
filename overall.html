@@ -124,6 +124,30 @@
         } catch { return null; }
       };
   
+      // Prefer consolidated week doc
+      try {
+        const wkRef = doc(db, "weeks", weekId);
+        const wkSnap = await getDoc(wkRef);
+        if (wkSnap.exists() && Array.isArray((wkSnap.data()||{}).games)){
+          const unsubDoc = onSnapshot(wkRef, (snap)=>{
+            const data = snap.data() || {};
+            const m = {};
+            (data.games || []).forEach(g => {
+              const id = g.id || Math.random().toString(36).slice(2,10);
+              m[id] = {
+                winner: lc(g.winner || ""),
+                home: lc(g.home || ""),
+                away: lc(g.away || "")
+              };
+            });
+            winnersByWeek.set(weekId, m);
+            renderNow();
+          });
+          weekListeners.set(weekId, unsubDoc);
+          return;
+        }
+      } catch(err) { console.warn('Week doc listener failed; trying legacy paths', err); }
+
       let unsub = await tryPath(() => collection(db, "weeks", weekId, "games"), "/weeks/*/games");
       if (!unsub) unsub = await tryPath(() => collection(db, weekId, "games"), "/{weekId}/games");
       if (!unsub) unsub = await tryPath(() => collection(db, weekId, weekId, "games"), "/{weekId}/{weekId}/games");

@@ -169,6 +169,23 @@
       return null;
     }
 
+    const normalizeGames = (arr)=> (arr||[]).map(g=>({
+      id: g.id || Math.random().toString(36).slice(2,10),
+      day: g.day || '',
+      home: g.home || '',
+      away: g.away || '',
+      winner: g.winner || '',
+      kickoff: g.kickoff || null,
+      kickoffTs: kickoffMs(g)
+    })).sort((a,b)=>{
+      const ka = kickoffMs(a);
+      const kb = kickoffMs(b);
+      if (ka === kb) return 0;
+      if (ka === null) return 1;
+      if (kb === null) return -1;
+      return ka - kb;
+    });
+
     // Collections
     const weekId = () => {
       const season = (inSeason.value || '').trim();
@@ -310,19 +327,20 @@
         console.error('Error loading picks', e);
       }
 
-      const gamesRef = colGames(currentWeekId);
-      const handleSnap = (snap)=>{
-        const games = snap.docs.map(d=>({ id:d.id, ...d.data() }))
-          .sort((a,b)=>{
-            const ka = kickoffMs(a);
-            const kb = kickoffMs(b);
-            if (ka === kb) return 0;
-            if (ka === null) return 1;
-            if (kb === null) return -1;
-            return ka - kb;
+      const weekRef = doc(db, 'weeks', currentWeekId);
+      try{
+        const wkSnap = await getDoc(weekRef);
+        if (wkSnap.exists() && Array.isArray((wkSnap.data()||{}).games)){
+          unsubGames = onSnapshot(weekRef, (snap)=>{
+            const data = snap.data() || {};
+            renderGames(normalizeGames(data.games));
           });
-        renderGames(games);
-      };
+          return;
+        }
+      }catch(err){ console.warn('Week doc listener failed; falling back to legacy collection', err); }
+
+      const gamesRef = colGames(currentWeekId);
+      const handleSnap = (snap)=> renderGames(normalizeGames(snap.docs.map(d=>({ id:d.id, ...d.data() }))));
       const fallbackSubscribe = ()=> onSnapshot(gamesRef, handleSnap);
       unsubGames = onSnapshot(query(gamesRef, orderBy('kickoffTs', 'asc')), handleSnap, (err)=>{
         console.warn('kickoffTs ordering failed — using unsorted listener', err);
