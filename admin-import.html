@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v20.6)</title>
+  <title>Admin Importer — Games Only (v20.7)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.6</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.7</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -213,7 +213,8 @@
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null, importing:false };
-    const commitChunkSize = 100;
+    const deleteChunkSize = 100;
+    const writeChunkSize = 1;
     const commitTimeoutMs = 120000;
     // Legacy guard: older pick-import code referenced pickUid/hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
     var pickUid = null;
@@ -555,7 +556,7 @@
       }
       const deleteFns = [];
       qs.forEach(function(d){ deleteFns.push(function(b){ b.delete(db.collection('weeks').doc(wid).collection('games').doc(d.id)); }); });
-      await commitChunks(deleteFns, commitChunkSize, 'Delete', commitTimeoutMs);
+      await commitChunks(deleteFns, deleteChunkSize, 'Delete', commitTimeoutMs);
       impLog('Deleted ' + qs.size + ' existing game(s)');
       return qs.size;
     }
@@ -623,7 +624,7 @@
         });
         if(writeFns.length){
           impSetStatus('Writing new games…');
-          await commitChunks(writeFns, commitChunkSize, 'Write', commitTimeoutMs);
+          await commitChunks(writeFns, writeChunkSize, 'Write', commitTimeoutMs);
         }
         impLog("Wrote " + state.parsed.games.length + " game(s)");
 
