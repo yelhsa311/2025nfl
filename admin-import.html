@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v21.2)</title>
+  <title>Admin Importer — Games Only (v21.3)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.2</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.3</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -295,13 +295,16 @@
         createdAt: g.createdAt || null
       };});
       try {
-        await db.collection('weeks').doc(wid).set({ games: payload, updatedAt: Date.now() }, { merge:true });
-      } catch(err){
-        console.warn('Primary Firestore write failed, trying REST fallback', err);
-        impLog('Primary Firestore write failed; attempting REST fallback…');
+        impLog('Saving via REST (JSON) …');
         await persistWeekGamesRest(wid, payload);
-        impLog('REST fallback succeeded.');
+        impLog('REST write succeeded.');
+        return;
+      } catch(err){
+        console.warn('REST write failed; trying Firestore SDK', err);
+        impLog('REST write failed; falling back to Firestore SDK…');
       }
+      await db.collection('weeks').doc(wid).set({ games: payload, updatedAt: Date.now() }, { merge:true });
+      impLog('Firestore SDK write succeeded.');
     }
     const deleteChunkSize = 100;
     const writeChunkSize = 1;
