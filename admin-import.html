@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v21.1)</title>
+  <title>Admin Importer — Games Only (v21.2)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.1</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.2</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -235,6 +235,54 @@
       });
     }
 
+    function toFirestoreValue(v){
+      if(v === undefined || v === null) return { nullValue: null };
+      const t = typeof v;
+      if(t === 'string') return { stringValue: v };
+      if(t === 'boolean') return { booleanValue: v };
+      if(t === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+      return { stringValue: String(v) };
+    }
+
+    function serializeGameForRest(g){
+      return {
+        mapValue: {
+          fields: {
+            id: toFirestoreValue(g.id || newId()),
+            day: toFirestoreValue(g.day || ""),
+            home: toFirestoreValue(g.home || ""),
+            away: toFirestoreValue(g.away || ""),
+            winner: toFirestoreValue(g.winner || ""),
+            kickoff: toFirestoreValue(g.kickoff || null),
+            kickoffTs: toFirestoreValue(g.kickoffTs ?? null),
+            createdAt: toFirestoreValue(g.createdAt ?? null)
+          }
+        }
+      };
+    }
+
+    async function persistWeekGamesRest(wid, games){
+      if(!auth.currentUser){ throw new Error('Not signed in; cannot run REST fallback'); }
+      const token = await auth.currentUser.getIdToken();
+      const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/(default)/documents/weeks/${wid}?updateMask.fieldPaths=games&updateMask.fieldPaths=updatedAt&mask.fieldPaths=games&mask.fieldPaths=updatedAt`;
+      const body = {
+        fields: {
+          games: { arrayValue: { values: (games||[]).map(serializeGameForRest) } },
+          updatedAt: { integerValue: String(Date.now()) }
+        }
+      };
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(body)
+      });
+      if(!res.ok){
+        const text = await res.text();
+        throw new Error('REST fallback failed: ' + res.status + ' ' + text);
+      }
+      return res.json();
+    }
+
     async function persistWeekGames(wid, games){
       const payload = (games||[]).map(function(g){ return {
         id: g.id || newId(),
@@ -246,7 +294,14 @@
         kickoffTs: g.kickoffTs ?? null,
         createdAt: g.createdAt || null
       };});
-      await db.collection('weeks').doc(wid).set({ games: payload, updatedAt: Date.now() }, { merge:true });
+      try {
+        await db.collection('weeks').doc(wid).set({ games: payload, updatedAt: Date.now() }, { merge:true });
+      } catch(err){
+        console.warn('Primary Firestore write failed, trying REST fallback', err);
+        impLog('Primary Firestore write failed; attempting REST fallback…');
+        await persistWeekGamesRest(wid, payload);
+        impLog('REST fallback succeeded.');
+      }
     }
     const deleteChunkSize = 100;
     const writeChunkSize = 1;
