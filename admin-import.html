@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v21.4)</title>
+  <title>Admin Importer — Games Only (v21.5)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.4</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v21.5</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -262,27 +262,44 @@
     }
 
     
+    
     async function persistWeekGames(wid, games){
-      const payload = (games||[]).map(function(g){ return {
-        id: g.id || newId(),
-        day: g.day || "",
-        home: g.home || "",
-        away: g.away || "",
-        winner: g.winner || "",
-        kickoff: g.kickoff || null,
-        kickoffTs: g.kickoffTs ?? null,
-        createdAt: g.createdAt || null
-      };});
-      try {
-        impLog('Saving games via Firestore SDK …');
-        await db.collection('weeks').doc(wid).set({ games: payload, updatedAt: Date.now() }, { merge:true });
-        impLog('Firestore SDK write succeeded.');
-      } catch(err){
-        console.error('Firestore SDK write failed', err);
-        impLog('Firestore SDK write failed: ' + (err && err.message ? err.message : String(err)));
+      const list = Array.isArray(games) ? games : [];
+      const count = list.length;
+      impLog('Saving ' + count + ' game(s) to "games" collection via Firestore SDK…');
+
+      if (!count){
+        impLog('No games to write; skipping Firestore write.');
+        return;
+      }
+
+      const batch = db.batch();
+      list.forEach(function(g){
+        const id = g.id || newId();
+        const ref = db.collection('games').doc(id);
+        batch.set(ref, {
+          id: id,
+          weekId: wid,
+          day: g.day || "",
+          home: g.home || "",
+          away: g.away || "",
+          winner: g.winner || "",
+          kickoff: g.kickoff || null,
+          kickoffTs: (g.kickoffTs ?? null),
+          createdAt: g.createdAt || Date.now()
+        }, { merge: true });
+      });
+
+      try{
+        await batch.commit();
+        impLog('Firestore SDK write (games collection batch) succeeded.');
+      }catch(err){
+        console.error('Firestore SDK write (games collection batch) failed', err);
+        impLog('Firestore SDK write (games collection batch) failed: ' + (err && err.message ? err.message : String(err)));
         throw err;
       }
     }
+
 const deleteChunkSize = 100;
     const writeChunkSize = 1;
     const commitTimeoutMs = 120000;
@@ -401,23 +418,62 @@ const deleteChunkSize = 100;
           }
         }catch(err){ console.warn('Week doc load failed; falling back to legacy collection', err); }
 
+        
         if (!state.games.length){
+          // First fallback: legacy subcollection weeks/{weekId}/games
           try{
             const snap = await wkRef.collection('games').orderBy('kickoffTs').get();
             const legacy = [];
             snap.forEach(function(d){
-              var g = d.data();
-              legacy.push({ id:d.id, day:g.day||"", kickoff:g.kickoff||"", home:g.home||"", away:g.away||"", winner:g.winner||"", kickoffTs: g.kickoffTs || null, createdAt: g.createdAt || null });
+              var g = d.data() || {};
+              legacy.push({
+                id: d.id,
+                day: g.day || "",
+                home: g.home || "",
+                away: g.away || "",
+                winner: g.winner || "",
+                kickoff: g.kickoff || null,
+                kickoffTs: g.kickoffTs || null,
+                createdAt: g.createdAt || null,
+                weekId: state.weekId
+              });
             });
             state.games = normalizeGames(legacy);
+          }catch(err){
+            console.error('Legacy subcollection load failed', err);
+          }
+        }
+
+        if (!state.games.length){
+          // Final fallback: top-level "games" collection filtered by weekId
+          try{
+            const snap = await db.collection('games').where('weekId','==', state.weekId).orderBy('kickoffTs').get();
+            const rows = [];
+            snap.forEach(function(d){
+              var g = d.data() || {};
+              rows.push({
+                id: d.id,
+                day: g.day || "",
+                home: g.home || "",
+                away: g.away || "",
+                winner: g.winner || "",
+                kickoff: g.kickoff || null,
+                kickoffTs: g.kickoffTs || null,
+                createdAt: g.createdAt || null,
+                weekId: state.weekId
+              });
+            });
+            state.games = normalizeGames(rows);
             if (state.games.length){
-              await persistWeekGames(state.weekId, state.games);
-              impLog('Migrated legacy game documents into week doc.');
+              impLog('Loaded ' + state.games.length + ' game(s) for ' + state.weekId + ' from top-level "games" collection.');
             }
-          }catch(err){ console.error(err); }
+          }catch(err){
+            console.error('Top-level "games" collection load failed', err);
+          }
         }
 
         renderGrid();
+
         byId('docCount').textContent = String(state.games.length);
         const list = state.games.slice(0,10).map(function(x){ return "• " + x.home + " vs " + x.away + " (" + x.day + ")"; }).join('<br>');
         byId('debugList').innerHTML = list || '<em>No games</em>';
@@ -645,12 +701,31 @@ const deleteChunkSize = 100;
         }
       }
     }
+    
     async function deleteExistingGames(wid){
-      // Legacy helper retained for compatibility; now replaced by a single doc write.
-      await persistWeekGames(wid, []);
-      impLog('Cleared games in week doc for ' + wid);
-      return 0;
+      impLog('Clearing existing games for ' + wid + ' from "games" collection…');
+      const snap = await db.collection('games').where('weekId','==', wid).get();
+      if (snap.empty){
+        impLog('No existing games found for ' + wid + '.');
+        return 0;
+      }
+      const batch = db.batch();
+      let deleted = 0;
+      snap.forEach(function(doc){
+        batch.delete(doc.ref);
+        deleted++;
+      });
+      try{
+        await batch.commit();
+        impLog('Deleted ' + deleted + ' game(s) for ' + wid + ' from "games" collection.');
+      }catch(err){
+        console.error('Failed to delete existing games for ' + wid, err);
+        impLog('Failed to delete existing games for ' + wid + ': ' + (err && err.message ? err.message : String(err)));
+        throw err;
+      }
+      return deleted;
     }
+
     function renderPreview(p){
       byId('previewInfo').textContent = "Games: " + p.games.length + (p.hasPick ? " • picks included" : "");
       const tbl = byId('previewTable'); tbl.innerHTML="";
