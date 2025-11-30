@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Importer — Games Only (v20.5)</title>
+  <title>Admin Importer — Games Only (v20.6)</title>
   <style>
     :root{
       --bg:#0e1116; --panel:#141922; --panel-2:#1b2230;
@@ -54,7 +54,7 @@
 <body>
   <header>
     <a href="./picks.html" id="backLink">← Back to App</a>
-    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.5</span></strong>
+    <strong>Admin Importer — Games Only <span class="role" style="margin-left:8px">v20.6</span></strong>
     <div class="sp"></div>
     <div id="userTag" class="role">…</div>
     <div id="roleTag" class="role">ADMIN</div>
@@ -213,7 +213,7 @@
 
     // ===== State =====
     const state = { season:2025, weekNum:1, weekId:weekId(2025,1), games:[], parsed:null, importing:false };
-    const commitChunkSize = 200;
+    const commitChunkSize = 100;
     const commitTimeoutMs = 120000;
     // Legacy guard: older pick-import code referenced pickUid/hasPick/hasPickUser; keep defined to prevent ReferenceErrors in caches
     var pickUid = null;
@@ -517,13 +517,33 @@
     async function commitChunks(actions, chunkSize, label, timeoutMs){
       const total = actions.length;
       let done = 0;
+      const commitLabel = label ? (label + ' commit') : 'Batch commit';
+      const singleLabel = label ? (label + ' single write') : 'Single write';
+      const singleTimeout = Math.max(1000, Math.round((timeoutMs||120000)/3));
       for(let i=0;i<actions.length;i+=chunkSize){
+        const slice = actions.slice(i, i+chunkSize);
         const b = db.batch();
-        actions.slice(i, i+chunkSize).forEach(function(fn){ fn(b); });
-        await withTimeout(b.commit(), label ? (label + ' commit') : 'Batch commit', timeoutMs);
-        done += Math.min(chunkSize, total - i);
-        if(label) impLog(label + ' chunk committed (' + done + '/' + total + ')');
-        impProg(Math.min(90, Math.round((done/Math.max(total,1))*70)+20));
+        slice.forEach(function(fn){ fn(b); });
+        try{
+          await withTimeout(b.commit(), commitLabel, timeoutMs);
+          done += Math.min(chunkSize, total - i);
+          if(label) impLog(label + ' chunk committed (' + done + '/' + total + ')');
+          impProg(Math.min(90, Math.round((done/Math.max(total,1))*70)+20));
+        }catch(err){
+          const msg = err && err.message ? err.message : '';
+          if(msg.indexOf('timed out') === -1){ throw err; }
+          impLog(commitLabel + ' timed out; retrying as individual writes…');
+          for(let j=0;j<slice.length;j++){
+            const singleBatch = db.batch();
+            slice[j](singleBatch);
+            await withTimeout(singleBatch.commit(), singleLabel, singleTimeout);
+            done += 1;
+            if(label && (j%5===0 || j===slice.length-1)){
+              impLog(singleLabel + ' retry progress (' + done + '/' + total + ')');
+            }
+            impProg(Math.min(90, Math.round((done/Math.max(total,1))*70)+20));
+          }
+        }
       }
     }
     async function deleteExistingGames(wid){
